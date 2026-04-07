@@ -11,34 +11,15 @@ export const AuthProvider = ({ children }) => {
 
   useEffect(() => {
     checkUserAuth();
-
-    const { data: authListener } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        if (session?.user) {
-          setUser(session.user);
-          setIsAuthenticated(true);
-        } else {
-          setUser(null);
-          setIsAuthenticated(false);
-        }
-        setIsLoadingAuth(false);
-      }
-    );
-
-    return () => {
-      authListener.subscription.unsubscribe();
-    };
   }, []);
 
   const checkUserAuth = async () => {
     try {
       setIsLoadingAuth(true);
-      const { data: { session }, error } = await supabase.auth.getSession();
+      const storedUser = localStorage.getItem('lava_user');
       
-      if (error) throw error;
-
-      if (session?.user) {
-        setUser(session.user);
+      if (storedUser) {
+        setUser(JSON.parse(storedUser));
         setIsAuthenticated(true);
       } else {
         setUser(null);
@@ -56,20 +37,38 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const logout = async () => {
+  const login = async (username, password) => {
     try {
-      await supabase.auth.signOut();
-      setUser(null);
-      setIsAuthenticated(false);
+      const { data, error } = await supabase
+        .from('lava_users')
+        .select('*')
+        .eq('username', username)
+        .eq('password', password);
+
+      if (error || !data || data.length === 0) {
+        return false;
+      }
+      
+      const user = data[0];
+
+      setUser(user);
+      setIsAuthenticated(true);
+      localStorage.setItem('lava_user', JSON.stringify(user));
+      return true;
     } catch (error) {
-      console.error('Logout failed:', error);
+      console.error('Login failed:', error);
+      return false;
     }
   };
 
-  const navigateToLogin = () => {
-    // In a real app, you might redirect to a login route
-    // For now, we'll just log that we need to login
-    console.log("Redirecting to login...");
+  const logout = async () => {
+    try {
+      setUser(null);
+      setIsAuthenticated(false);
+      localStorage.removeItem('lava_user');
+    } catch (error) {
+      console.error('Logout failed:', error);
+    }
   };
 
   return (
@@ -80,8 +79,8 @@ export const AuthProvider = ({ children }) => {
       isLoadingPublicSettings: false, // Mocked for compatibility
       authError,
       appPublicSettings: null, // Mocked for compatibility
+      login,
       logout,
-      navigateToLogin,
       checkAppState: checkUserAuth // Alias for compatibility
     }}>
       {children}

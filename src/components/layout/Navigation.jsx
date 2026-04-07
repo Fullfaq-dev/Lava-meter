@@ -1,18 +1,23 @@
 import React from "react";
 import { Link, useLocation } from "react-router-dom";
-import { TableProperties, PenLine, BarChart3, Zap, PackageOpen, FileText } from "lucide-react";
+import { TableProperties, PenLine, BarChart3, Zap, PackageOpen, FileText, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/lib/AuthContext";
+import { Button } from "@/components/ui/button";
 
 const navItems = [
-  { path: "/", label: "Ведомость", icon: TableProperties },
-  { path: "/input", label: "Ввод данных", icon: PenLine },
-  { path: "/production", label: "Выпуск", icon: PackageOpen },
-  { path: "/energy-report", label: "Потребление ЭЭ", icon: FileText },
-  { path: "/analytics", label: "Аналитика", icon: BarChart3 },
+  { path: "/", label: "Ведомость", icon: TableProperties, accessKey: "access_vedomost" },
+  { path: "/input", label: "Ввод данных", icon: PenLine, accessKey: "access_input" },
+  { path: "/production", label: "Выпуск", icon: PackageOpen, accessKey: "access_production" },
+  { path: "/energy-report", label: "Потребление ЭЭ", icon: FileText, accessKey: "access_energy_report" },
+  { path: "/analytics", label: "Аналитика", icon: BarChart3, accessKey: "access_analytics" },
 ];
 
 export default function Navigation() {
   const location = useLocation();
+  const { user, logout } = useAuth();
+
+  const filteredNavItems = navItems.filter(item => user && user[item.accessKey]);
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 md:fixed md:top-0 md:bottom-auto">
@@ -25,30 +30,40 @@ export default function Navigation() {
             </div>
             <span className="font-semibold text-foreground tracking-tight">ЭнергоУчёт</span>
           </div>
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = location.pathname === item.path;
-            return (
-              <Link
-                key={item.path}
-                to={item.path}
-                className={cn(
-                  "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-300",
-                  isActive
-                    ? "bg-white/10 text-foreground shadow-lg shadow-primary/10"
-                    : "text-muted-foreground hover:text-foreground hover:bg-white/5"
-                )}
-              >
-                <Icon className="w-4 h-4" />
-                {item.label}
-              </Link>
-            );
-          })}
+          <div className="flex-1 flex items-center gap-1">
+            {filteredNavItems.map((item) => {
+              const Icon = item.icon;
+              const isActive = location.pathname === item.path;
+              return (
+                <Link
+                  key={item.path}
+                  to={item.path}
+                  className={cn(
+                    "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-300",
+                    isActive
+                      ? "bg-white/10 text-foreground shadow-lg shadow-primary/10"
+                      : "text-muted-foreground hover:text-foreground hover:bg-white/5"
+                  )}
+                >
+                  <Icon className="w-4 h-4" />
+                  {item.label}
+                </Link>
+              );
+            })}
+          </div>
+          {user && (
+            <div className="flex items-center gap-4 ml-auto">
+              <span className="text-sm text-muted-foreground">{user.username}</span>
+              <Button variant="ghost" size="icon" onClick={logout} title="Выйти">
+                <LogOut className="w-4 h-4" />
+              </Button>
+            </div>
+          )}
         </div>
 
         {/* Mobile bottom nav */}
         <div className="flex md:hidden items-center justify-around rounded-2xl border border-white/10 bg-black/60 backdrop-blur-2xl px-2 py-2 mb-2">
-          {navItems.map((item) => {
+          {filteredNavItems.map((item) => {
             const Icon = item.icon;
             const isActive = location.pathname === item.path;
             return (
