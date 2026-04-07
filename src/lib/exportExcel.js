@@ -353,6 +353,231 @@ export const exportEnergyReportToExcel = async ({
     sheet.getCell(`${col}${currentRow}`).border = borderMedium;
   });
 
+  // --- Spacer ---
+  currentRow += 2;
+
+  // --- Собственные нужды ---
+  sheet.getRow(currentRow).height = 30;
+  sheet.getCell(`A${currentRow}`).value = 'Собственные нужды\nзавода (СН1)*';
+  sheet.getCell(`A${currentRow}`).font = fontNormal;
+  sheet.getCell(`A${currentRow}`).alignment = alignCenter;
+  sheet.getCell(`A${currentRow}`).border = borderMedium;
+
+  sheet.getCell(`B${currentRow}`).value = form.sn_zavod_kwh || 0;
+  sheet.getCell(`B${currentRow}`).font = fontNormal;
+  sheet.getCell(`B${currentRow}`).alignment = alignCenter;
+  sheet.getCell(`B${currentRow}`).border = borderMedium;
+  currentRow++;
+
+  sheet.getRow(currentRow).height = 30;
+  sheet.getCell(`A${currentRow}`).value = 'Собственные нужды\nэнергоцентра';
+  sheet.getCell(`A${currentRow}`).font = fontNormal;
+  sheet.getCell(`A${currentRow}`).alignment = alignCenter;
+  sheet.getCell(`A${currentRow}`).border = borderMedium;
+
+  sheet.getCell(`B${currentRow}`).value = form.sn_energocenter_kwh || 0;
+  sheet.getCell(`B${currentRow}`).font = fontNormal;
+  sheet.getCell(`B${currentRow}`).alignment = alignCenter;
+  sheet.getCell(`B${currentRow}`).border = borderMedium;
+  currentRow++;
+
+  sheet.getRow(currentRow).height = 30;
+  sheet.getCell(`A${currentRow}`).value = 'Потери в кабелях 10\nкВ  и';
+  sheet.getCell(`A${currentRow}`).font = fontNormal;
+  sheet.getCell(`A${currentRow}`).alignment = alignCenter;
+  sheet.getCell(`A${currentRow}`).border = borderMedium;
+
+  sheet.getCell(`B${currentRow}`).value = form.losses_cable_kwh || 0;
+  sheet.getCell(`B${currentRow}`).font = fontNormal;
+  sheet.getCell(`B${currentRow}`).alignment = alignCenter;
+  sheet.getCell(`B${currentRow}`).border = borderMedium;
+  currentRow++;
+
+  sheet.getRow(currentRow).height = 20;
+  sheet.getCell(`A${currentRow}`).value = 'в трансформаторах';
+  sheet.getCell(`A${currentRow}`).font = fontNormal;
+  sheet.getCell(`A${currentRow}`).alignment = alignCenter;
+  sheet.getCell(`A${currentRow}`).border = borderMedium;
+
+  sheet.getCell(`B${currentRow}`).value = form.losses_transformer_kwh || 0;
+  sheet.getCell(`B${currentRow}`).font = fontNormal;
+  sheet.getCell(`B${currentRow}`).alignment = alignCenter;
+  sheet.getCell(`B${currentRow}`).border = borderMedium;
+  currentRow++;
+
+  sheet.getRow(currentRow).height = 30;
+  sheet.getCell(`A${currentRow}`).value = 'Котельная в зимний\nпериод';
+  sheet.getCell(`A${currentRow}`).font = fontNormal;
+  sheet.getCell(`A${currentRow}`).alignment = alignCenter;
+  sheet.getCell(`A${currentRow}`).border = borderMedium;
+
+  sheet.getCell(`B${currentRow}`).value = form.boiler_kwh || 0;
+  sheet.getCell(`B${currentRow}`).font = fontNormal;
+  sheet.getCell(`B${currentRow}`).alignment = alignCenter;
+  sheet.getCell(`B${currentRow}`).border = borderMedium;
+  currentRow++;
+
+  // --- Spacer ---
+  currentRow += 2;
+
+  // --- Энергоцентр Header ---
+  sheet.mergeCells(`A${currentRow}:G${currentRow}`);
+  sheet.getCell(`A${currentRow}`).value = 'Источник электроснабжения – «Энергоцентр» (СН1)';
+  sheet.getCell(`A${currentRow}`).font = fontBold;
+  sheet.getCell(`A${currentRow}`).alignment = alignCenter;
+  currentRow++;
+
+  // Table Headers
+  sheet.getRow(currentRow).height = 60;
+  sheet.getCell(`A${currentRow}`).value = 'Данные АСКУЭ';
+  sheet.getCell(`B${currentRow}`).value = 'Выработано\nэлектроэнергии,\nкВтч.';
+  sheet.getCell(`C${currentRow}`).value = 'Оплата за газ,\nруб.';
+  sheet.getCell(`D${currentRow}`).value = 'Объем\nпотребл.\nгаза, куб.\nм.';
+  sheet.getCell(`E${currentRow}`).value = 'Фактическая\nстоимость\n1 кВтч., руб.';
+  sheet.getCell(`F${currentRow}`).value = 'Стоимость\n1м3 газа,\nруб.';
+  sheet.getCell(`G${currentRow}`).value = 'Стоимость\n1000м3 газа,\nруб.';
+
+  ['A', 'B', 'C', 'D', 'E', 'F', 'G'].forEach(col => {
+    const cell = sheet.getCell(`${col}${currentRow}`);
+    cell.font = fontNormal;
+    cell.alignment = alignCenter;
+    cell.border = borderMedium;
+  });
+  currentRow++;
+
+  // Table Data
+  sheet.getRow(currentRow).height = 30;
+  sheet.getCell(`A${currentRow}`).value = 'Активная энергия';
+  sheet.getCell(`A${currentRow}`).font = fontBold;
+  sheet.getCell(`A${currentRow}`).alignment = alignCenter;
+  sheet.getCell(`A${currentRow}`).border = borderMedium;
+  sheet.getCell(`A${currentRow}`).fill = fillGreen;
+
+  const ecProduced = form.ec_produced_kwh || 0;
+  const ecGasPayment = form.ec_gas_payment_rub || 0;
+  const ecGasVolume = form.ec_gas_volume_m3 || 0;
+  
+  const ecCostPerKwh = ecProduced > 0 ? ecGasPayment / ecProduced : 0;
+  const ecGasPerM3 = ecGasVolume > 0 ? ecGasPayment / ecGasVolume : 0;
+  const ecGasPer1000M3 = ecGasPerM3 * 1000;
+
+  sheet.getCell(`B${currentRow}`).value = ecProduced;
+  sheet.getCell(`C${currentRow}`).value = ecGasPayment;
+  sheet.getCell(`C${currentRow}`).numFmt = '#,##0.00 ₽';
+  sheet.getCell(`D${currentRow}`).value = ecGasVolume;
+  sheet.getCell(`E${currentRow}`).value = ecCostPerKwh;
+  sheet.getCell(`E${currentRow}`).numFmt = '#,##0.00 ₽';
+  sheet.getCell(`F${currentRow}`).value = ecGasPerM3;
+  sheet.getCell(`F${currentRow}`).numFmt = '#,##0.00 ₽';
+  sheet.getCell(`G${currentRow}`).value = ecGasPer1000M3;
+  sheet.getCell(`G${currentRow}`).numFmt = '#,##0.00 ₽';
+
+  ['B', 'C', 'D', 'E', 'F', 'G'].forEach(col => {
+    const cell = sheet.getCell(`${col}${currentRow}`);
+    cell.font = fontBold;
+    cell.alignment = alignCenter;
+    cell.border = borderMedium;
+    cell.fill = fillGreen;
+  });
+  currentRow++;
+
+  // --- Spacer ---
+  currentRow += 2;
+
+  // --- Text List ---
+  const textLines = [
+    '*В состав потребителей (СН1) от ТП-Вязьма-2 входят:',
+    '- офисные и бытовые помещения 1-го произв. корпуса',
+    '- помещения и оборудование службы ремонта и наладки',
+    '- помещения складов и освещение навесов',
+    '- помещения и оборудование котельной',
+    '- охлаждение трансформаторов КТП-1 и КТП-2',
+    '- помещения охраны 1-я проходная и 2-я проходная',
+    '- освещение территории предприятия',
+    '- освещение производственных помещений 1-го корпуса',
+    '- обогрев устройств лотков и трубопроводов водостоков',
+    '  с крыши участка вторичной переработки и с 4, 5 навесов'
+  ];
+
+  textLines.forEach(line => {
+    sheet.mergeCells(`A${currentRow}:E${currentRow}`);
+    const cell = sheet.getCell(`A${currentRow}`);
+    cell.value = line;
+    cell.font = fontNormal;
+    cell.alignment = { vertical: 'middle', horizontal: 'left' };
+    currentRow++;
+  });
+
+  // --- Spacer ---
+  currentRow += 1;
+
+  // --- Totals ---
+  const totalKwh = (form.vazma_active_kwh || 0) + (form.ec_produced_kwh || 0);
+  const totalCost = (form.vazma_active_rosseti_rub || 0) +
+                    (form.vazma_active_atom_rub || 0) +
+                    (form.vazma_reactive_rosseti_rub || 0) +
+                    (form.ec_gas_payment_rub || 0);
+  const totalCostPerKwh = totalKwh > 0 ? totalCost / totalKwh : 0;
+
+  // Row 1: Общее потребление
+  sheet.getRow(currentRow).height = 25;
+  sheet.mergeCells(`A${currentRow}:D${currentRow}`);
+  sheet.getCell(`A${currentRow}`).value = 'Общее потребление завода от ПС «Вязьма-2» и «Энергоцентра» -';
+  sheet.getCell(`A${currentRow}`).font = fontBold;
+  sheet.getCell(`A${currentRow}`).alignment = { vertical: 'middle', horizontal: 'right' };
+
+  sheet.mergeCells(`E${currentRow}:F${currentRow}`);
+  sheet.getCell(`E${currentRow}`).value = totalKwh;
+  sheet.getCell(`E${currentRow}`).font = fontBold;
+  sheet.getCell(`E${currentRow}`).alignment = alignCenter;
+  sheet.getCell(`E${currentRow}`).border = borderMedium;
+  sheet.getCell(`E${currentRow}`).fill = fillGreen;
+
+  sheet.getCell(`G${currentRow}`).value = 'кВт*ч';
+  sheet.getCell(`G${currentRow}`).font = fontBold;
+  sheet.getCell(`G${currentRow}`).alignment = { vertical: 'middle', horizontal: 'left' };
+  currentRow++;
+
+  // Row 2: Общая стоимость
+  sheet.getRow(currentRow).height = 25;
+  sheet.mergeCells(`A${currentRow}:D${currentRow}`);
+  sheet.getCell(`A${currentRow}`).value = 'Общая стоимость электроэнергии и газа с НДС 20% -';
+  sheet.getCell(`A${currentRow}`).font = fontBold;
+  sheet.getCell(`A${currentRow}`).alignment = { vertical: 'middle', horizontal: 'right' };
+
+  sheet.mergeCells(`E${currentRow}:F${currentRow}`);
+  sheet.getCell(`E${currentRow}`).value = totalCost;
+  sheet.getCell(`E${currentRow}`).font = fontBold;
+  sheet.getCell(`E${currentRow}`).alignment = alignCenter;
+  sheet.getCell(`E${currentRow}`).border = borderMedium;
+  sheet.getCell(`E${currentRow}`).fill = fillGreen;
+  sheet.getCell(`E${currentRow}`).numFmt = '#,##0.00 ₽';
+
+  sheet.getCell(`G${currentRow}`).value = 'руб';
+  sheet.getCell(`G${currentRow}`).font = fontBold;
+  sheet.getCell(`G${currentRow}`).alignment = { vertical: 'middle', horizontal: 'left' };
+  currentRow++;
+
+  // Row 3: Фактическая стоимость
+  sheet.getRow(currentRow).height = 25;
+  sheet.mergeCells(`A${currentRow}:D${currentRow}`);
+  sheet.getCell(`A${currentRow}`).value = 'Фактическая стоимость 1 кВт*ч. –';
+  sheet.getCell(`A${currentRow}`).font = fontBold;
+  sheet.getCell(`A${currentRow}`).alignment = { vertical: 'middle', horizontal: 'right' };
+
+  sheet.mergeCells(`E${currentRow}:F${currentRow}`);
+  sheet.getCell(`E${currentRow}`).value = totalCostPerKwh;
+  sheet.getCell(`E${currentRow}`).font = fontBold;
+  sheet.getCell(`E${currentRow}`).alignment = alignCenter;
+  sheet.getCell(`E${currentRow}`).border = borderMedium;
+  sheet.getCell(`E${currentRow}`).fill = fillGreen;
+  sheet.getCell(`E${currentRow}`).numFmt = '0.00';
+
+  sheet.getCell(`G${currentRow}`).value = 'руб/кВт*ч';
+  sheet.getCell(`G${currentRow}`).font = fontBold;
+  sheet.getCell(`G${currentRow}`).alignment = { vertical: 'middle', horizontal: 'left' };
+  currentRow++;
+
   // Generate and save file
   const buffer = await workbook.xlsx.writeBuffer();
   const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
