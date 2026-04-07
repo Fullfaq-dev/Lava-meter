@@ -1,13 +1,17 @@
 import React, { useState, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { MONTHS } from "@/lib/meterConfig";
 import { supabase } from "@/api/supabaseClient";
+import { listReadings, listProduction } from "@/lib/supabaseApi";
+import { calcLineConsumption } from "@/lib/consumptionCalc";
 import GlassCard from "../components/layout/GlassCard";
 import MonthSelector from "../components/table/MonthSelector";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Save, Loader2, Check, Zap, Factory, Flame } from "lucide-react";
+import { Save, Loader2, Check, Zap, Factory, Flame, Download } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { exportEnergyReportToExcel } from "@/lib/exportExcel";
 
 const fmt = (v) =>
   v != null && !isNaN(v) ? Number(v).toLocaleString("ru-RU", { maximumFractionDigits: 2 }) : "—";
@@ -57,6 +61,27 @@ export default function EnergyReportInput() {
   const [existingId, setExistingId] = useState(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  const { data: readings } = useQuery({
+    queryKey: ['readings-sb', selectedYear, selectedMonth],
+    queryFn: () => listReadings({ year: selectedYear, month: selectedMonth }),
+    initialData: [],
+  });
+
+  const { data: production } = useQuery({
+    queryKey: ['production-sb', selectedYear, selectedMonth],
+    queryFn: () => listProduction({ year: selectedYear, month: selectedMonth }).then(rows => rows[0] || null),
+  });
+
+  const lineCalc = calcLineConsumption(readings || [], production);
+
+  const vedomostTotal = (readings || []).reduce((sum, r) => {
+    if ([2, 3, 12].includes(r.meter_number)) {
+      return sum;
+    }
+    const fclRow = (lineCalc || []).find(lc => lc.meter_number === r.meter_number);
+    return sum + (fclRow ? fclRow.total_consumption : (r.consumption || 0));
+  }, 0);
 
   const set = (key) => (val) => setForm((prev) => ({ ...prev, [key]: val }));
 
@@ -122,12 +147,38 @@ export default function EnergyReportInput() {
   const ec_gas_per_1000m3 = ec_gas_per_m3 != null ? ec_gas_per_m3 * 1000 : null;
 
   // Итоги
-  const total_kwh = (f.vazma_active_kwh ?? 0) + (f.ec_produced_kwh ?? 0);
+  const sn_total =
+    (f.sn_zavod_kwh ?? 0) +
+    (f.sn_energocenter_kwh ?? 0) +
+    (f.losses_cable_kwh ?? 0) +
+    (f.losses_transformer_kwh ?? 0) +
+    (f.boiler_kwh ?? 0);
+
+  const total_kwh = vedomostTotal + sn_total;
+  const total_kwh_vazma_ec = (f.vazma_active_kwh ?? 0) + (f.ec_produced_kwh ?? 0);
   const total_cost =
     (f.vazma_active_rosseti_rub ?? 0) +
     (f.vazma_active_atom_rub ?? 0) +
     (f.ec_gas_payment_rub ?? 0);
   const total_cost_per_kwh = total_kwh > 0 ? total_cost / total_kwh : null;
+
+  const handleExport = async () => {
+    try {
+      await exportEnergyReportToExcel({
+        monthName: selectedMonth,
+        year: selectedYear,
+        form,
+        lineCalc: lineCalc || [],
+        readings: readings || [],
+        production,
+        vazmaCostPerKwh: vazma_cost_per_kwh
+      });
+      toast.success("Файл успешно скачан");
+    } catch (error) {
+      console.error("Export error:", error);
+      toast.error("Ошибка при скачивании файла");
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -140,14 +191,23 @@ export default function EnergyReportInput() {
             Ввод данных АСКУЭ и расчётных показателей
           </p>
         </div>
-        <GlassCard className="p-4 min-w-[280px]">
-          <MonthSelector
-            selectedMonth={selectedMonth}
-            selectedYear={selectedYear}
-            onMonthChange={setSelectedMonth}
-            onYearChange={setSelectedYear}
-          />
-        </GlassCard>
+        <div className="flex items-center gap-4">
+          <Button
+            onClick={handleExport}
+            className="bg-green-600/20 hover:bg-green-600/30 text-green-500 border border-green-600/20 h-full py-4"
+          >
+            <Download className="w-5 h-5 mr-2" />
+            Скачать Excel
+          </Button>
+          <GlassCard className="p-4 min-w-[280px]">
+            <MonthSelector
+              selectedMonth={selectedMonth}
+              selectedYear={selectedYear}
+              onMonthChange={setSelectedMonth}
+              onYearChange={setSelectedYear}
+            />
+          </GlassCard>
+        </div>
       </div>
 
       {loading ? (
@@ -231,7 +291,21 @@ export default function EnergyReportInput() {
             <div className="space-y-0">
               <div className="flex justify-between py-2.5 border-b border-white/5">
                 <span className="text-xs text-muted-foreground">Общее потребление (Вязьма-2 + Энергоцентр)</span>
-                <span className="text-xs font-bold text-primary tabular-nums">{fmt(total_kwh)} кВтч</span>
+                <span className="text-xs font-bold text-primary tabular-nums">{fmt(total_kwh_vazma_ec)} кВтч</span>
+              </div>
+              <div className="flex flex-col py-2.5 border-b border-white/5 gap-1.5">
+                <div className="flex justify-between">
+                  <span className="text-xs text-muted-foreground">Общее потребление (Ведомость + СН и потери)</span>
+                  <span className="text-xs font-bold text-primary tabular-nums">{fmt(total_kwh)} кВтч</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[10px] text-muted-foreground/70 pl-2 border-l-2 border-white/10">в т.ч. общий расход из ведомости</span>
+                  <span className="text-[10px] text-muted-foreground tabular-nums">{fmt(vedomostTotal)} кВтч</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[10px] text-muted-foreground/70 pl-2 border-l-2 border-white/10">в т.ч. собственные нужды и потери</span>
+                  <span className="text-[10px] text-muted-foreground tabular-nums">{fmt(sn_total)} кВтч</span>
+                </div>
               </div>
               <div className="flex justify-between py-2.5 border-b border-white/5">
                 <span className="text-xs text-muted-foreground">Общая стоимость ЭЭ и газа (с НДС 20%)</span>

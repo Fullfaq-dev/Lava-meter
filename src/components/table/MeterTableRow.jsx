@@ -1,13 +1,28 @@
 import React from "react";
 import { cn } from "@/lib/utils";
 import FclCalcTooltip from "./FclCalcTooltip.jsx";
+import NormCalcTooltip from "./NormCalcTooltip.jsx";
 
-export default function MeterTableRow({ meter, reading, index, lineCalcRow, readings }) {
+export default function MeterTableRow({ meter, reading, index, lineCalcRow, readings, productionOutput }) {
   const hasReading = reading !== null;
 
   const displayTotal = lineCalcRow
     ? lineCalcRow.total_consumption
     : reading?.consumption ?? null;
+
+  // Calculate norm (kWh/kg)
+  let norm = null;
+  let outputKg = null;
+  
+  if (displayTotal != null) {
+    if (lineCalcRow && lineCalcRow.output_kg > 0) {
+      norm = displayTotal / lineCalcRow.output_kg;
+      outputKg = lineCalcRow.output_kg;
+    } else if (productionOutput > 0) {
+      norm = displayTotal / productionOutput;
+      outputKg = productionOutput;
+    }
+  }
 
   return (
     <tr
@@ -86,6 +101,19 @@ export default function MeterTableRow({ meter, reading, index, lineCalcRow, read
               {displayTotal.toLocaleString("ru-RU")}
             </span>
           </FclCalcTooltip>
+        ) : (
+          "—"
+        )}
+      </td>
+
+      {/* Норма */}
+      <td className="px-3 py-2.5 text-center text-xs tabular-nums text-muted-foreground">
+        {norm !== null ? (
+          <NormCalcTooltip norm={norm} totalConsumption={displayTotal} outputKg={outputKg}>
+            <span className="cursor-help underline decoration-dotted">
+              {norm.toFixed(3)}
+            </span>
+          </NormCalcTooltip>
         ) : (
           "—"
         )}

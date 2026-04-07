@@ -54,6 +54,25 @@ export default function Vedomost() {
   const getLineCalcRow = (meterNumber) =>
     lineCalc.find(r => r.meter_number === meterNumber) || null;
 
+  const getProductionForMeter = (meterNumber) => {
+    if (!production) return null;
+    // FCL lines are handled by lineCalcRow, but we also need to handle other meters
+    // that have production output (peremotka, granulyaciya)
+    const meter = METERS.find(m => m.number === meterNumber);
+    if (!meter) return null;
+
+    // Map meter numbers to production keys
+    const productionMap = {
+      7: "peremotka", // Сч.8 Участок перемотки
+      11: "granulyaciya3", // Сч.12 Гранулятор №3
+      20: "granulyaciya1", // Сч.21 Гранулятор №1
+      21: "granulyaciya2", // Сч.22 Гранулятор №2
+    };
+
+    const key = productionMap[meterNumber];
+    return key ? production[key] : null;
+  };
+
   const filteredMeters = METERS.filter(m => {
     if (filter === "fcl")       return FCL_METER_NUMBERS.has(m.number);
     if (filter === "fricooler") return FRICOOLER_METER_NUMBERS.has(m.number);
@@ -120,6 +139,7 @@ export default function Vedomost() {
                     index={index}
                     lineCalcRow={getLineCalcRow(meter.number)}
                     readings={readings}
+                    productionOutput={getProductionForMeter(meter.number)}
                   />
                 ))}
               </tbody>

@@ -31,6 +31,9 @@ export default function MeterTableHeader() {
         <th className="px-3 py-3 text-center text-xs font-semibold text-accent uppercase tracking-wider font-bold min-w-[110px]">
           Итого
         </th>
+        <th className="px-3 py-3 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider min-w-[80px]">
+          Норма
+        </th>
       </tr>
     </thead>
   );

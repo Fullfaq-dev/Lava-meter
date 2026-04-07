@@ -1,13 +1,13 @@
 import React, { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { METERS, MONTHS } from "@/lib/meterConfig";
-import { listReadings, upsertReadings } from "@/lib/supabaseApi";
+import { listReadings, upsertReadings, deleteReading } from "@/lib/supabaseApi";
 import GlassCard from "../components/layout/GlassCard";
 import MonthSelector from "../components/table/MonthSelector";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Save, Loader2, Check, Search } from "lucide-react";
+import { Save, Loader2, Check, Search, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -55,9 +55,6 @@ export default function DataInput() {
       initialReading = prevReadings[0].current_reading;
     }
 
-    const difference = currentReading - initialReading;
-    const consumption = difference * meter.coefficient;
-
     await upsertReadings({
       meter_number: meter.number,
       meter_code: meter.code,
@@ -68,14 +65,23 @@ export default function DataInput() {
       month: selectedMonth,
       initial_reading: initialReading,
       current_reading: currentReading,
-      difference,
-      consumption,
     });
 
     queryClient.invalidateQueries({ queryKey: ['readings-sb', selectedYear, selectedMonth] });
     setSavingMeter(null);
     setInputValues(prev => ({ ...prev, [meter.number]: "" }));
     toast.success(`${meter.code} сохранён в Supabase`);
+  };
+
+  const handleDelete = async (existingId, meterCode) => {
+    if (!confirm(`Удалить показания для ${meterCode}?`)) return;
+    try {
+      await deleteReading(existingId);
+      queryClient.invalidateQueries({ queryKey: ['readings-sb', selectedYear, selectedMonth] });
+      toast.success(`${meterCode} удалён`);
+    } catch (error) {
+      toast.error(`Ошибка при удалении: ${error.message}`);
+    }
   };
 
   const filteredMeters = METERS.filter(m =>
@@ -191,6 +197,16 @@ export default function DataInput() {
                       <Save className="w-4 h-4" />
                     )}
                   </Button>
+                  {hasData && (
+                    <Button
+                      size="icon"
+                      variant="destructive"
+                      onClick={() => handleDelete(existing.id, meter.code)}
+                      className="shrink-0"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  )}
                 </div>
               </GlassCard>
             );
