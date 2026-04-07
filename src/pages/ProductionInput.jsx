@@ -8,8 +8,11 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Save, Loader2, Check } from "lucide-react";
 import { toast } from "sonner";
+import { useAuth } from "@/lib/AuthContext";
 
 export default function ProductionInput() {
+  const { user } = useAuth();
+  const canEdit = user?.can_edit;
   const now = new Date();
   const currentMonthIndex = now.getMonth();
   const defaultMonthIndex = currentMonthIndex === 0 ? 11 : currentMonthIndex - 1;
@@ -94,6 +97,7 @@ export default function ProductionInput() {
                       setValues((prev) => ({ ...prev, [key]: e.target.value }))
                     }
                     className="bg-white/5 border-white/10 pr-10"
+                    disabled={!canEdit}
                   />
                   <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
                     кг
@@ -110,14 +114,16 @@ export default function ProductionInput() {
                 Данные за этот месяц уже внесены
               </div>
             )}
-            <Button
-              onClick={handleSave}
-              disabled={saving}
-              className="ml-auto bg-primary/20 hover:bg-primary/30 text-primary border border-primary/20"
-            >
-              {saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Save className="w-4 h-4 mr-2" />}
-              Сохранить
-            </Button>
+            {canEdit && (
+              <Button
+                onClick={handleSave}
+                disabled={saving}
+                className="ml-auto bg-primary/20 hover:bg-primary/30 text-primary border border-primary/20"
+              >
+                {saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Save className="w-4 h-4 mr-2" />}
+                Сохранить
+              </Button>
+            )}
           </div>
         </GlassCard>
       )}

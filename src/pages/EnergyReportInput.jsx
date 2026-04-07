@@ -12,6 +12,7 @@ import { Save, Loader2, Check, Zap, Factory, Flame, Download } from "lucide-reac
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { exportEnergyReportToExcel } from "@/lib/exportExcel";
+import { useAuth } from "@/lib/AuthContext";
 
 const fmt = (v) =>
   v != null && !isNaN(v) ? Number(v).toLocaleString("ru-RU", { maximumFractionDigits: 2 }) : "—";
@@ -21,7 +22,7 @@ const fmtRub = (v) =>
     ? Number(v).toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " ₽"
     : "—";
 
-function FieldRow({ label, value, onChange, unit, placeholder = "0" }) {
+function FieldRow({ label, value, onChange, unit, placeholder = "0", disabled = false }) {
   return (
     <div className="flex items-center justify-between gap-3 py-2 border-b border-white/5 last:border-0">
       <span className="text-xs text-muted-foreground flex-1">{label}</span>
@@ -32,6 +33,7 @@ function FieldRow({ label, value, onChange, unit, placeholder = "0" }) {
           value={value ?? ""}
           onChange={(e) => onChange(e.target.value === "" ? null : parseFloat(e.target.value))}
           className="w-40 bg-white/5 border-white/10 text-right text-xs tabular-nums h-8"
+          disabled={disabled}
         />
         {unit && <span className="text-xs text-muted-foreground w-12 shrink-0">{unit}</span>}
       </div>
@@ -51,6 +53,8 @@ function CalcRow({ label, value, unit, highlight }) {
 }
 
 export default function EnergyReportInput() {
+  const { user } = useAuth();
+  const canEdit = user?.can_edit;
   const now = new Date();
   const currentMonthIndex = now.getMonth();
   const defaultMonthIndex = currentMonthIndex === 0 ? 11 : currentMonthIndex - 1;
@@ -230,17 +234,17 @@ export default function EnergyReportInput() {
             </div>
 
             <p className="text-[10px] font-semibold text-primary uppercase tracking-wide mb-2">Активная энергия</p>
-            <FieldRow label="Потребление от ПС Вязьма-2" value={f.vazma_active_kwh} onChange={set("vazma_active_kwh")} unit="кВтч" />
-            <FieldRow label="Оплата Россети Центр–Смоленск-энерго" value={f.vazma_active_rosseti_rub} onChange={set("vazma_active_rosseti_rub")} unit="руб" />
-            <FieldRow label="Оплата АтомЭнергоСбыт" value={f.vazma_active_atom_rub} onChange={set("vazma_active_atom_rub")} unit="руб" />
+            <FieldRow label="Потребление от ПС Вязьма-2" value={f.vazma_active_kwh} onChange={set("vazma_active_kwh")} unit="кВтч" disabled={!canEdit} />
+            <FieldRow label="Оплата Россети Центр–Смоленск-энерго" value={f.vazma_active_rosseti_rub} onChange={set("vazma_active_rosseti_rub")} unit="руб" disabled={!canEdit} />
+            <FieldRow label="Оплата АтомЭнергоСбыт" value={f.vazma_active_atom_rub} onChange={set("vazma_active_atom_rub")} unit="руб" disabled={!canEdit} />
 
             <div className="mt-2 rounded-lg bg-primary/5 border border-primary/15 px-3 py-2">
               <CalcRow label="Фактическая стоимость 1 кВтч" value={vazma_cost_per_kwh != null ? fmt(vazma_cost_per_kwh) + " ₽" : "—"} highlight />
             </div>
 
             <p className="text-[10px] font-semibold text-primary uppercase tracking-wide mt-4 mb-2">Реактивная энергия</p>
-            <FieldRow label="Потребление реактивное" value={f.vazma_reactive_kwh} onChange={set("vazma_reactive_kwh")} unit="кВтч" />
-            <FieldRow label="Оплата Россети (реактивная)" value={f.vazma_reactive_rosseti_rub} onChange={set("vazma_reactive_rosseti_rub")} unit="руб" />
+            <FieldRow label="Потребление реактивное" value={f.vazma_reactive_kwh} onChange={set("vazma_reactive_kwh")} unit="кВтч" disabled={!canEdit} />
+            <FieldRow label="Оплата Россети (реактивная)" value={f.vazma_reactive_rosseti_rub} onChange={set("vazma_reactive_rosseti_rub")} unit="руб" disabled={!canEdit} />
           </GlassCard>
 
           {/* Блок 2: Собственные нужды */}
@@ -255,11 +259,11 @@ export default function EnergyReportInput() {
               </div>
             </div>
 
-            <FieldRow label="Собственные нужды завода (СН1)*" value={f.sn_zavod_kwh} onChange={set("sn_zavod_kwh")} unit="кВтч" />
-            <FieldRow label="Собственные нужды энергоцентра" value={f.sn_energocenter_kwh} onChange={set("sn_energocenter_kwh")} unit="кВтч" />
-            <FieldRow label="Потери в кабелях 10 кВ" value={f.losses_cable_kwh} onChange={set("losses_cable_kwh")} unit="кВтч" />
-            <FieldRow label="Потери в трансформаторах" value={f.losses_transformer_kwh} onChange={set("losses_transformer_kwh")} unit="кВтч" />
-            <FieldRow label="Котельная в зимний период" value={f.boiler_kwh} onChange={set("boiler_kwh")} unit="кВтч" />
+            <FieldRow label="Собственные нужды завода (СН1)*" value={f.sn_zavod_kwh} onChange={set("sn_zavod_kwh")} unit="кВтч" disabled={!canEdit} />
+            <FieldRow label="Собственные нужды энергоцентра" value={f.sn_energocenter_kwh} onChange={set("sn_energocenter_kwh")} unit="кВтч" disabled={!canEdit} />
+            <FieldRow label="Потери в кабелях 10 кВ" value={f.losses_cable_kwh} onChange={set("losses_cable_kwh")} unit="кВтч" disabled={!canEdit} />
+            <FieldRow label="Потери в трансформаторах" value={f.losses_transformer_kwh} onChange={set("losses_transformer_kwh")} unit="кВтч" disabled={!canEdit} />
+            <FieldRow label="Котельная в зимний период" value={f.boiler_kwh} onChange={set("boiler_kwh")} unit="кВтч" disabled={!canEdit} />
           </GlassCard>
 
           {/* Блок 3: Энергоцентр */}
@@ -274,9 +278,9 @@ export default function EnergyReportInput() {
               </div>
             </div>
 
-            <FieldRow label="Выработано электроэнергии" value={f.ec_produced_kwh} onChange={set("ec_produced_kwh")} unit="кВтч" />
-            <FieldRow label="Оплата за газ" value={f.ec_gas_payment_rub} onChange={set("ec_gas_payment_rub")} unit="руб" />
-            <FieldRow label="Объём потребл. газа" value={f.ec_gas_volume_m3} onChange={set("ec_gas_volume_m3")} unit="куб.м" />
+            <FieldRow label="Выработано электроэнергии" value={f.ec_produced_kwh} onChange={set("ec_produced_kwh")} unit="кВтч" disabled={!canEdit} />
+            <FieldRow label="Оплата за газ" value={f.ec_gas_payment_rub} onChange={set("ec_gas_payment_rub")} unit="руб" disabled={!canEdit} />
+            <FieldRow label="Объём потребл. газа" value={f.ec_gas_volume_m3} onChange={set("ec_gas_volume_m3")} unit="куб.м" disabled={!canEdit} />
 
             <div className="mt-3 rounded-lg bg-chart-3/5 border border-chart-3/20 px-3 py-2 space-y-0.5">
               <CalcRow label="Факт. стоимость 1 кВтч" value={ec_cost_per_kwh != null ? fmt(ec_cost_per_kwh) + " ₽" : "—"} highlight />
@@ -323,7 +327,7 @@ export default function EnergyReportInput() {
         </div>
       )}
 
-      {!loading && (
+      {!loading && canEdit && (
         <div className="flex justify-between items-center">
           {existingId && (
             <div className="flex items-center gap-1.5 text-xs text-chart-3">

@@ -10,8 +10,11 @@ import { Badge } from "@/components/ui/badge";
 import { Save, Loader2, Check, Search, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { useAuth } from "@/lib/AuthContext";
 
 export default function DataInput() {
+  const { user } = useAuth();
+  const canEdit = user?.can_edit;
   const now = new Date();
   const currentMonthIndex = now.getMonth();
   const defaultMonthIndex = currentMonthIndex === 0 ? 11 : currentMonthIndex - 1;
@@ -184,28 +187,33 @@ export default function DataInput() {
                     onChange={(e) => setInputValues(prev => ({ ...prev, [meter.number]: e.target.value }))}
                     className="bg-white/5 border-white/10 text-sm tabular-nums"
                     onKeyDown={(e) => e.key === 'Enter' && handleSave(meter)}
+                    disabled={!canEdit}
                   />
-                  <Button
-                    size="icon"
-                    onClick={() => handleSave(meter)}
-                    disabled={savingMeter === meter.number || !inputValues[meter.number]}
-                    className="bg-primary/20 hover:bg-primary/30 text-primary border border-primary/20 shrink-0"
-                  >
-                    {savingMeter === meter.number ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <Save className="w-4 h-4" />
-                    )}
-                  </Button>
-                  {hasData && (
-                    <Button
-                      size="icon"
-                      variant="destructive"
-                      onClick={() => handleDelete(existing.id, meter.code)}
-                      className="shrink-0"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
+                  {canEdit && (
+                    <>
+                      <Button
+                        size="icon"
+                        onClick={() => handleSave(meter)}
+                        disabled={savingMeter === meter.number || !inputValues[meter.number]}
+                        className="bg-primary/20 hover:bg-primary/30 text-primary border border-primary/20 shrink-0"
+                      >
+                        {savingMeter === meter.number ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <Save className="w-4 h-4" />
+                        )}
+                      </Button>
+                      {hasData && (
+                        <Button
+                          size="icon"
+                          variant="destructive"
+                          onClick={() => handleDelete(existing.id, meter.code)}
+                          className="shrink-0"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      )}
+                    </>
                   )}
                 </div>
               </GlassCard>
