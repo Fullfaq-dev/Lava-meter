@@ -7,6 +7,11 @@ export default function MeterSummaryCards({ readings, meters, lineCalc }) {
   // для остальных счётчиков — их собственный consumption
   const fclMeterNumbers = new Set((lineCalc || []).map(r => r.meter_number));
   const totalConsumption = readings.reduce((sum, r) => {
+    // Исключаем счетчики фрикуллеров (2, 3, 13) из общего расхода,
+    // так как их расход уже распределен по линиям FCL
+    if ([2, 3, 12].includes(r.meter_number)) {
+      return sum;
+    }
     const fclRow = (lineCalc || []).find(lc => lc.meter_number === r.meter_number);
     return sum + (fclRow ? fclRow.total_consumption : (r.consumption || 0));
   }, 0);
@@ -36,6 +41,9 @@ export default function MeterSummaryCards({ readings, meters, lineCalc }) {
           {totalConsumption.toLocaleString('ru-RU')}
         </p>
         <p className="text-[10px] text-muted-foreground">кВт·ч</p>
+        <p className="text-[9px] text-muted-foreground/70 mt-1 leading-tight">
+          *Сч.2, Сч.3, Сч.13 не идут в подсчет напрямую
+        </p>
       </GlassCard>
 
       <GlassCard className="p-4">
