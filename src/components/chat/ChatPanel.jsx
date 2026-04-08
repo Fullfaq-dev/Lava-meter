@@ -1,130 +1,135 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/lib/AuthContext';
 import { supabase } from '@/api/supabaseClient';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { MessageSquare, Send, Loader2, Bot, User, Trash2 } from 'lucide-react';
+import { MessageSquare, Send, Loader2, Bot, User } from 'lucide-react';
 import { cn } from '@/lib/utils';
+
+const N8N_WEBHOOK_URL = import.meta.env.VITE_N8N_WEBHOOK_URL;
+const REPLY_TIMEOUT_MS = 90_000;
 
 export default function ChatPanel() {
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
-  const [isStreaming, setIsStreaming] = useState(false);
+  const [isWaiting, setIsWaiting] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const messagesEndRef = useRef(null);
-  const abortRef = useRef(null);
+  const timeoutRef = useRef(null);
+  const channelRef = useRef(null);
 
-  // Load history each time the panel opens
+  // ── Load history + subscribe Realtime when panel opens ───────────────────
   useEffect(() => {
-    if (open && user?.id) {
-      loadHistory();
-    }
+    if (!open || !user?.id) return;
+
+    loadHistory();
+    subscribeRealtime();
+
+    return () => {
+      channelRef.current?.unsubscribe();
+      clearTimeout(timeoutRef.current);
+    };
   }, [open, user?.id]);
 
-  // Scroll to bottom on new messages / streaming
+  // ── Scroll to bottom ─────────────────────────────────────────────────────
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isStreaming]);
+  }, [messages, isWaiting]);
 
+  // ── Load full message history from Supabase ───────────────────────────────
   const loadHistory = async () => {
     setHistoryLoading(true);
     const { data, error } = await supabase
       .from('chat_messages')
-      .select('role, content, created_at')
+      .select('id, role, content, created_at')
       .eq('user_id', user.id)
       .order('created_at', { ascending: true })
-      .limit(100);
+      .limit(200);
 
     if (!error && data) {
-      setMessages(
-        data.map((m, i) => ({
-          id: `h-${i}-${m.created_at}`,
-          role: m.role,
-          content: m.content,
-        }))
-      );
+      setMessages(data.map((m) => ({ id: m.id, role: m.role, content: m.content })));
     }
     setHistoryLoading(false);
   };
 
-  const clearHistory = async () => {
-    if (!user?.id) return;
-    await supabase.from('chat_messages').delete().eq('user_id', user.id);
-    setMessages([]);
+  // ── Supabase Realtime — new messages saved by n8n appear here ────────────
+  const subscribeRealtime = () => {
+    channelRef.current?.unsubscribe();
+
+    channelRef.current = supabase
+      .channel(`chat-${user.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'chat_messages',
+          filter: `user_id=eq.${user.id}`,
+        },
+        (payload) => {
+          const msg = payload.new;
+          setMessages((prev) => {
+            if (prev.find((m) => m.id === msg.id)) return prev;
+            return [...prev, { id: msg.id, role: msg.role, content: msg.content }];
+          });
+          // Hide typing indicator when assistant reply arrives
+          if (msg.role === 'assistant') {
+            setIsWaiting(false);
+            clearTimeout(timeoutRef.current);
+          }
+        }
+      )
+      .subscribe();
   };
 
-  const sendMessage = useCallback(
-    async (text) => {
-      const trimmed = text.trim();
-      if (!trimmed || isStreaming) return;
+  // ── Send message to n8n webhook ───────────────────────────────────────────
+  const sendMessage = async (text) => {
+    const trimmed = (text || '').trim();
+    if (!trimmed || isWaiting) return;
 
-      const userMsg = { id: `u-${Date.now()}`, role: 'user', content: trimmed };
-      const newMessages = [...messages, userMsg];
-      setMessages(newMessages);
-      setInput('');
-      setIsStreaming(true);
+    setInput('');
+    setIsWaiting(true);
 
-      // Persist user message
-      if (user?.id) {
-        supabase.from('chat_messages').insert({ user_id: user.id, role: 'user', content: trimmed });
-      }
+    try {
+      await fetch(N8N_WEBHOOK_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.id,
+          username: user.username,
+          message: trimmed,
+        }),
+      });
+    } catch {
+      setIsWaiting(false);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `err-${Date.now()}`,
+          role: 'assistant',
+          content: 'Не удалось подключиться к серверу. Проверьте соединение.',
+        },
+      ]);
+      return;
+    }
 
-      // Placeholder for the streaming assistant reply
-      const assistantId = `a-${Date.now()}`;
-      setMessages((prev) => [...prev, { id: assistantId, role: 'assistant', content: '' }]);
-
-      try {
-        abortRef.current = new AbortController();
-
-        const response = await fetch('/api/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            messages: newMessages.map(({ role, content }) => ({ role, content })),
-          }),
-          signal: abortRef.current.signal,
-        });
-
-        if (!response.ok) throw new Error(`Server error ${response.status}`);
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let fullText = '';
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          fullText += decoder.decode(value, { stream: true });
-          setMessages((prev) =>
-            prev.map((m) => (m.id === assistantId ? { ...m, content: fullText } : m))
-          );
-        }
-
-        // Persist assistant message
-        if (user?.id && fullText) {
-          supabase
-            .from('chat_messages')
-            .insert({ user_id: user.id, role: 'assistant', content: fullText });
-        }
-      } catch (err) {
-        if (err.name !== 'AbortError') {
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === assistantId
-                ? { ...m, content: 'Ошибка при получении ответа. Попробуйте снова.' }
-                : m
-            )
-          );
-        }
-      } finally {
-        setIsStreaming(false);
-      }
-    },
-    [messages, isStreaming, user]
-  );
+    // Timeout fallback if n8n never responds
+    clearTimeout(timeoutRef.current);
+    timeoutRef.current = setTimeout(() => {
+      setIsWaiting(false);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `timeout-${Date.now()}`,
+          role: 'assistant',
+          content: 'Ответ не получен в течение 90 секунд. Попробуйте позже.',
+        },
+      ]);
+    }, REPLY_TIMEOUT_MS);
+  };
 
   const onSubmit = (e) => {
     e.preventDefault();
@@ -157,35 +162,22 @@ export default function ChatPanel() {
         >
           {/* Header */}
           <SheetHeader className="px-4 py-3 border-b border-white/10 flex-shrink-0">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-primary/15 border border-primary/25 flex items-center justify-center">
-                  <Bot className="w-5 h-5 text-primary" />
-                </div>
-                <div className="text-left">
-                  <SheetTitle className="text-sm font-semibold leading-tight">
-                    ИИ Ассистент
-                  </SheetTitle>
-                  <p className="text-xs text-muted-foreground leading-tight">
-                    {user?.username ? `Сессия: ${user.username}` : 'Система мониторинга «Лава»'}
-                  </p>
-                </div>
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-primary/15 border border-primary/25 flex items-center justify-center">
+                <Bot className="w-5 h-5 text-primary" />
               </div>
-              {messages.length > 0 && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="w-7 h-7 text-muted-foreground hover:text-destructive mr-7"
-                  onClick={clearHistory}
-                  title="Очистить историю"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </Button>
-              )}
+              <div className="text-left">
+                <SheetTitle className="text-sm font-semibold leading-tight">
+                  ИИ Ассистент
+                </SheetTitle>
+                <p className="text-xs text-muted-foreground leading-tight">
+                  {user?.username ? `Сессия: ${user.username}` : 'Система мониторинга «Лава»'}
+                </p>
+              </div>
             </div>
           </SheetHeader>
 
-          {/* Messages area */}
+          {/* Messages */}
           <div className="flex-1 overflow-y-auto px-4 py-4 min-h-0">
             {historyLoading ? (
               <div className="flex items-center justify-center h-full">
@@ -207,7 +199,7 @@ export default function ChatPanel() {
                 <div className="flex flex-col gap-2 w-full max-w-xs mt-2">
                   {[
                     'Какой счётчик потребляет больше всего?',
-                    'Объясни расчёт доли фрикулера',
+                    'Покажи данные за прошлый месяц',
                     'Что такое удельный расход?',
                   ].map((hint) => (
                     <button
@@ -252,22 +244,33 @@ export default function ChatPanel() {
                           : 'bg-muted rounded-tl-sm'
                       )}
                     >
-                      {m.content || (
-                        <span className="flex gap-1 items-center py-0.5">
-                          <span className="w-1.5 h-1.5 bg-muted-foreground/60 rounded-full animate-bounce [animation-delay:0ms]" />
-                          <span className="w-1.5 h-1.5 bg-muted-foreground/60 rounded-full animate-bounce [animation-delay:150ms]" />
-                          <span className="w-1.5 h-1.5 bg-muted-foreground/60 rounded-full animate-bounce [animation-delay:300ms]" />
-                        </span>
-                      )}
+                      {m.content}
                     </div>
                   </div>
                 ))}
+
+                {/* Typing indicator while waiting for n8n */}
+                {isWaiting && (
+                  <div className="flex gap-2 items-start">
+                    <div className="w-7 h-7 rounded-full bg-muted border border-white/10 flex items-center justify-center flex-shrink-0 mt-0.5">
+                      <Bot className="w-3.5 h-3.5 text-muted-foreground" />
+                    </div>
+                    <div className="bg-muted rounded-2xl rounded-tl-sm px-3.5 py-3">
+                      <div className="flex gap-1 items-center">
+                        <span className="w-1.5 h-1.5 bg-muted-foreground/60 rounded-full animate-bounce [animation-delay:0ms]" />
+                        <span className="w-1.5 h-1.5 bg-muted-foreground/60 rounded-full animate-bounce [animation-delay:150ms]" />
+                        <span className="w-1.5 h-1.5 bg-muted-foreground/60 rounded-full animate-bounce [animation-delay:300ms]" />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 <div ref={messagesEndRef} />
               </div>
             )}
           </div>
 
-          {/* Input area */}
+          {/* Input */}
           <form
             onSubmit={onSubmit}
             className="px-4 py-3 border-t border-white/10 flex gap-2 items-end flex-shrink-0"
@@ -279,15 +282,15 @@ export default function ChatPanel() {
               placeholder="Спросите об энергопотреблении..."
               className="resize-none min-h-[40px] max-h-[120px] text-sm bg-muted/40 border-white/10 focus-visible:ring-primary/40 leading-relaxed"
               rows={1}
-              disabled={isStreaming}
+              disabled={isWaiting}
             />
             <Button
               type="submit"
               size="icon"
-              disabled={isStreaming || !input.trim()}
+              disabled={isWaiting || !(input || '').trim()}
               className="flex-shrink-0 h-10 w-10"
             >
-              {isStreaming ? (
+              {isWaiting ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
               ) : (
                 <Send className="w-4 h-4" />
