@@ -1,5 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { useChat } from '@ai-sdk/react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '@/lib/AuthContext';
 import { supabase } from '@/api/supabaseClient';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
@@ -11,33 +10,24 @@ import { cn } from '@/lib/utils';
 export default function ChatPanel() {
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState('');
+  const [isStreaming, setIsStreaming] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const messagesEndRef = useRef(null);
+  const abortRef = useRef(null);
 
-  const { messages, input, handleInputChange, handleSubmit, isLoading, setMessages } = useChat({
-    api: '/api/chat',
-    onFinish: async (message) => {
-      if (user?.id) {
-        await supabase.from('chat_messages').insert({
-          user_id: user.id,
-          role: 'assistant',
-          content: message.content,
-        });
-      }
-    },
-  });
-
-  // Load chat history from Supabase each time the panel opens
+  // Load history each time the panel opens
   useEffect(() => {
     if (open && user?.id) {
       loadHistory();
     }
   }, [open, user?.id]);
 
-  // Scroll to bottom whenever messages change or AI is typing
+  // Scroll to bottom on new messages / streaming
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isLoading]);
+  }, [messages, isStreaming]);
 
   const loadHistory = async () => {
     setHistoryLoading(true);
@@ -51,7 +41,7 @@ export default function ChatPanel() {
     if (!error && data) {
       setMessages(
         data.map((m, i) => ({
-          id: `history-${i}-${m.created_at}`,
+          id: `h-${i}-${m.created_at}`,
           role: m.role,
           content: m.content,
         }))
@@ -66,26 +56,85 @@ export default function ChatPanel() {
     setMessages([]);
   };
 
-  const onSubmit = async (e) => {
+  const sendMessage = useCallback(
+    async (text) => {
+      const trimmed = text.trim();
+      if (!trimmed || isStreaming) return;
+
+      const userMsg = { id: `u-${Date.now()}`, role: 'user', content: trimmed };
+      const newMessages = [...messages, userMsg];
+      setMessages(newMessages);
+      setInput('');
+      setIsStreaming(true);
+
+      // Persist user message
+      if (user?.id) {
+        supabase.from('chat_messages').insert({ user_id: user.id, role: 'user', content: trimmed });
+      }
+
+      // Placeholder for the streaming assistant reply
+      const assistantId = `a-${Date.now()}`;
+      setMessages((prev) => [...prev, { id: assistantId, role: 'assistant', content: '' }]);
+
+      try {
+        abortRef.current = new AbortController();
+
+        const response = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            messages: newMessages.map(({ role, content }) => ({ role, content })),
+          }),
+          signal: abortRef.current.signal,
+        });
+
+        if (!response.ok) throw new Error(`Server error ${response.status}`);
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let fullText = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          fullText += decoder.decode(value, { stream: true });
+          setMessages((prev) =>
+            prev.map((m) => (m.id === assistantId ? { ...m, content: fullText } : m))
+          );
+        }
+
+        // Persist assistant message
+        if (user?.id && fullText) {
+          supabase
+            .from('chat_messages')
+            .insert({ user_id: user.id, role: 'assistant', content: fullText });
+        }
+      } catch (err) {
+        if (err.name !== 'AbortError') {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantId
+                ? { ...m, content: 'Ошибка при получении ответа. Попробуйте снова.' }
+                : m
+            )
+          );
+        }
+      } finally {
+        setIsStreaming(false);
+      }
+    },
+    [messages, isStreaming, user]
+  );
+
+  const onSubmit = (e) => {
     e.preventDefault();
-    if (!input.trim() || isLoading) return;
-
-    // Save user message to Supabase before sending
-    if (user?.id) {
-      await supabase.from('chat_messages').insert({
-        user_id: user.id,
-        role: 'user',
-        content: input,
-      });
-    }
-
-    handleSubmit(e);
+    sendMessage(input);
   };
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      onSubmit(e);
+      sendMessage(input);
     }
   };
 
@@ -150,7 +199,8 @@ export default function ChatPanel() {
                 <div className="space-y-1">
                   <p className="text-sm font-medium text-foreground/70">Чем могу помочь?</p>
                   <p className="text-xs opacity-60 leading-relaxed">
-                    Задайте вопрос по показаниям счётчиков,<br />
+                    Задайте вопрос по показаниям счётчиков,
+                    <br />
                     потреблению энергии или производству.
                   </p>
                 </div>
@@ -162,9 +212,7 @@ export default function ChatPanel() {
                   ].map((hint) => (
                     <button
                       key={hint}
-                      onClick={() => {
-                        handleInputChange({ target: { value: hint } });
-                      }}
+                      onClick={() => sendMessage(hint)}
                       className="text-xs text-left px-3 py-2 rounded-lg bg-muted/50 hover:bg-muted border border-white/5 transition-colors text-muted-foreground hover:text-foreground"
                     >
                       {hint}
@@ -185,7 +233,9 @@ export default function ChatPanel() {
                     <div
                       className={cn(
                         'w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5',
-                        m.role === 'user' ? 'bg-primary/20' : 'bg-muted border border-white/10'
+                        m.role === 'user'
+                          ? 'bg-primary/20'
+                          : 'bg-muted border border-white/10'
                       )}
                     >
                       {m.role === 'user' ? (
@@ -202,28 +252,16 @@ export default function ChatPanel() {
                           : 'bg-muted rounded-tl-sm'
                       )}
                     >
-                      {m.content}
+                      {m.content || (
+                        <span className="flex gap-1 items-center py-0.5">
+                          <span className="w-1.5 h-1.5 bg-muted-foreground/60 rounded-full animate-bounce [animation-delay:0ms]" />
+                          <span className="w-1.5 h-1.5 bg-muted-foreground/60 rounded-full animate-bounce [animation-delay:150ms]" />
+                          <span className="w-1.5 h-1.5 bg-muted-foreground/60 rounded-full animate-bounce [animation-delay:300ms]" />
+                        </span>
+                      )}
                     </div>
                   </div>
                 ))}
-
-                {/* Typing indicator */}
-                {isLoading && (
-                  <div className="flex gap-2 items-start">
-                    <div className="w-7 h-7 rounded-full bg-muted border border-white/10 flex items-center justify-center flex-shrink-0 mt-0.5">
-                      <Bot className="w-3.5 h-3.5 text-muted-foreground" />
-                    </div>
-                    <div className="bg-muted rounded-2xl rounded-tl-sm px-3.5 py-3">
-                      <div className="flex gap-1 items-center">
-                        <span className="w-1.5 h-1.5 bg-muted-foreground/60 rounded-full animate-bounce [animation-delay:0ms]" />
-                        <span className="w-1.5 h-1.5 bg-muted-foreground/60 rounded-full animate-bounce [animation-delay:150ms]" />
-                        <span className="w-1.5 h-1.5 bg-muted-foreground/60 rounded-full animate-bounce [animation-delay:300ms]" />
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Scroll anchor */}
                 <div ref={messagesEndRef} />
               </div>
             )}
@@ -236,20 +274,20 @@ export default function ChatPanel() {
           >
             <Textarea
               value={input}
-              onChange={handleInputChange}
+              onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Спросите об энергопотреблении..."
               className="resize-none min-h-[40px] max-h-[120px] text-sm bg-muted/40 border-white/10 focus-visible:ring-primary/40 leading-relaxed"
               rows={1}
-              disabled={isLoading}
+              disabled={isStreaming}
             />
             <Button
               type="submit"
               size="icon"
-              disabled={isLoading || !input.trim()}
+              disabled={isStreaming || !input.trim()}
               className="flex-shrink-0 h-10 w-10"
             >
-              {isLoading ? (
+              {isStreaming ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
               ) : (
                 <Send className="w-4 h-4" />
