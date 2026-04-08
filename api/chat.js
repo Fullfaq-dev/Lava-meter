@@ -60,6 +60,9 @@ export default async function handler(req) {
   const openrouter = createOpenAI({
     baseURL: 'https://openrouter.ai/api/v1',
     apiKey,
+    // Force Chat Completions API (/v1/chat/completions) instead of the
+    // newer Responses API (/v1/responses) which OpenRouter does not support.
+    compatibility: 'compatible',
   });
 
   const result = streamText({
