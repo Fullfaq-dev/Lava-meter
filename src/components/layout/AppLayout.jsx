@@ -1,6 +1,7 @@
 import React from "react";
 import { Outlet } from "react-router-dom";
 import Navigation from "./Navigation";
+import ChatPanel from "@/components/chat/ChatPanel";
 
 export default function AppLayout() {
   return (
@@ -17,6 +18,9 @@ export default function AppLayout() {
       <main className="relative z-10 pt-4 pb-24 md:pt-20 md:pb-8 px-4 max-w-7xl mx-auto">
         <Outlet />
       </main>
+
+      {/* AI Chat — floating panel, available on all pages */}
+      <ChatPanel />
     </div>
   );
 }
