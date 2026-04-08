@@ -50,3 +50,32 @@ export async function upsertProduction(data) {
   if (error) throw error;
   return result || [];
 }
+
+// ── Line Summary (computed FCL totals) ────────────────────────────
+
+export async function listLineSummary({ year, month } = {}) {
+  let query = supabase.from("meter_line_summary").select("*").order("meter_number", { ascending: true });
+  if (year)  query = query.eq("year", year);
+  if (month) query = query.eq("month", month);
+
+  const { data, error } = await query;
+  if (error) throw error;
+  return data || [];
+}
+
+/**
+ * Сохраняет (upsert) итоговый расчёт по ВСЕМ счётчикам в meter_line_summary.
+ * Каждая строка rows уже содержит все нужные поля.
+ * @param {Array} rows - подготовленный массив записей с year, month и полями счётчиков
+ */
+export async function upsertLineSummary(rows) {
+  if (!rows || rows.length === 0) return [];
+
+  const { data: result, error } = await supabase
+    .from("meter_line_summary")
+    .upsert(rows, { onConflict: "year,month,meter_number" })
+    .select();
+
+  if (error) throw error;
+  return result || [];
+}

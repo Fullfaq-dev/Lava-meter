@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { MONTHS } from "@/lib/meterConfig";
 import { supabase } from "@/api/supabaseClient";
-import { listReadings, listProduction } from "@/lib/supabaseApi";
+import { listReadings, listProduction, upsertLineSummary } from "@/lib/supabaseApi";
 import { calcLineConsumption } from "@/lib/consumptionCalc";
 import GlassCard from "../components/layout/GlassCard";
 import MonthSelector from "../components/table/MonthSelector";
@@ -165,6 +165,65 @@ export default function EnergyReportInput() {
     (f.vazma_active_atom_rub ?? 0) +
     (f.ec_gas_payment_rub ?? 0);
   const total_cost_per_kwh = total_kwh > 0 ? total_cost / total_kwh : null;
+
+  // ── Авто-сохранение месячного агрегата в meter_line_summary ──────
+  const lastSavedEeKey = useRef("");
+
+  useEffect(() => {
+    // Ждём пока загрузятся данные энергоотчёта и показания счётчиков
+    if (loading) return;
+    if (Object.keys(form).length === 0) return;
+
+    const key = `${selectedYear}__${selectedMonth}`;
+    if (lastSavedEeKey.current === key) return;
+    lastSavedEeKey.current = key;
+
+    const row = {
+      year:         selectedYear,
+      month:        selectedMonth,
+      meter_number: 0,                   // зарезервировано для месячного агрегата ЭЭ
+      meter_code:   "EE_REPORT",
+      meter_name:   "Ведомость потребления ЭЭ — месячный итог",
+      // Итоговые поля для быстрого доступа
+      raw_consumption:   vedomostTotal,
+      total_consumption: total_kwh,
+      cost_per_kwh:      total_cost_per_kwh,
+      cost_rub:          total_cost,
+      // Все поля ввода и производные — в JSONB
+      extra_data: {
+        // Сырые данные ввода
+        vazma_active_kwh:          form.vazma_active_kwh          ?? null,
+        vazma_active_rosseti_rub:  form.vazma_active_rosseti_rub  ?? null,
+        vazma_active_atom_rub:     form.vazma_active_atom_rub     ?? null,
+        vazma_reactive_kwh:        form.vazma_reactive_kwh        ?? null,
+        vazma_reactive_rosseti_rub:form.vazma_reactive_rosseti_rub ?? null,
+        sn_zavod_kwh:              form.sn_zavod_kwh              ?? null,
+        sn_energocenter_kwh:       form.sn_energocenter_kwh       ?? null,
+        losses_cable_kwh:          form.losses_cable_kwh          ?? null,
+        losses_transformer_kwh:    form.losses_transformer_kwh    ?? null,
+        boiler_kwh:                form.boiler_kwh                ?? null,
+        ec_produced_kwh:           form.ec_produced_kwh           ?? null,
+        ec_gas_payment_rub:        form.ec_gas_payment_rub        ?? null,
+        ec_gas_volume_m3:          form.ec_gas_volume_m3          ?? null,
+        // Вычисленные показатели
+        vazma_cost_per_kwh:        vazma_cost_per_kwh             ?? null,
+        ec_cost_per_kwh:           ec_cost_per_kwh                ?? null,
+        ec_gas_per_m3:             ec_gas_per_m3                  ?? null,
+        ec_gas_per_1000m3:         ec_gas_per_1000m3              ?? null,
+        sn_total_kwh:              sn_total,
+        total_kwh_vazma_ec:        total_kwh_vazma_ec,
+        total_kwh:                 total_kwh,
+        vedomost_total_kwh:        vedomostTotal,
+        total_cost_rub:            total_cost,
+        total_cost_per_kwh:        total_cost_per_kwh             ?? null,
+      },
+      calculated_at: new Date().toISOString(),
+    };
+
+    upsertLineSummary([row]).catch((err) => {
+      console.error("[meter_line_summary] Ошибка сохранения EE агрегата:", err);
+    });
+  }, [loading, selectedYear, selectedMonth, form, vedomostTotal, total_kwh, total_cost, total_cost_per_kwh]);
 
   const handleExport = async () => {
     try {

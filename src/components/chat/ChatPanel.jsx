@@ -8,7 +8,22 @@ import { MessageSquare, Send, Loader2, Bot, User } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const N8N_WEBHOOK_URL = import.meta.env.VITE_N8N_WEBHOOK_URL;
-const REPLY_TIMEOUT_MS = 90_000;
+
+// n8n_chat_histories: { id, session_id, message: { type:"human"|"ai", content } }
+const mapRow = (row) => ({
+  id: row.id,
+  role: row.message?.type === 'human' ? 'user' : 'assistant',
+  content: row.message?.content ?? '',
+});
+
+// Extract text from n8n response — handles common n8n AI Agent output formats
+const extractReply = (data) => {
+  if (!data) return 'Пустой ответ от сервера.';
+  if (Array.isArray(data)) {
+    return data[0]?.output ?? data[0]?.reply ?? data[0]?.text ?? JSON.stringify(data[0]);
+  }
+  return data.output ?? data.reply ?? data.text ?? data.message ?? JSON.stringify(data);
+};
 
 export default function ChatPanel() {
   const { user } = useAuth();
@@ -18,117 +33,78 @@ export default function ChatPanel() {
   const [isWaiting, setIsWaiting] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const messagesEndRef = useRef(null);
-  const timeoutRef = useRef(null);
-  const channelRef = useRef(null);
 
-  // ── Load history + subscribe Realtime when panel opens ───────────────────
+  // ── Load history from Supabase when panel opens ───────────────────────────
   useEffect(() => {
-    if (!open || !user?.id) return;
-
+    if (!open || !user?.username) return;
     loadHistory();
-    subscribeRealtime();
-
-    return () => {
-      channelRef.current?.unsubscribe();
-      clearTimeout(timeoutRef.current);
-    };
-  }, [open, user?.id]);
+  }, [open, user?.username]);
 
   // ── Scroll to bottom ─────────────────────────────────────────────────────
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isWaiting]);
 
-  // ── Load full message history from Supabase ───────────────────────────────
   const loadHistory = async () => {
     setHistoryLoading(true);
     const { data, error } = await supabase
-      .from('chat_messages')
-      .select('id, role, content, created_at')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: true })
+      .from('n8n_chat_histories')
+      .select('id, session_id, message')
+      .eq('session_id', user.username)
+      .order('id', { ascending: true })
       .limit(200);
 
     if (!error && data) {
-      setMessages(data.map((m) => ({ id: m.id, role: m.role, content: m.content })));
+      setMessages(data.map(mapRow));
     }
     setHistoryLoading(false);
   };
 
-  // ── Supabase Realtime — new messages saved by n8n appear here ────────────
-  const subscribeRealtime = () => {
-    channelRef.current?.unsubscribe();
-
-    channelRef.current = supabase
-      .channel(`chat-${user.id}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'chat_messages',
-          filter: `user_id=eq.${user.id}`,
-        },
-        (payload) => {
-          const msg = payload.new;
-          setMessages((prev) => {
-            if (prev.find((m) => m.id === msg.id)) return prev;
-            return [...prev, { id: msg.id, role: msg.role, content: msg.content }];
-          });
-          // Hide typing indicator when assistant reply arrives
-          if (msg.role === 'assistant') {
-            setIsWaiting(false);
-            clearTimeout(timeoutRef.current);
-          }
-        }
-      )
-      .subscribe();
-  };
-
-  // ── Send message to n8n webhook ───────────────────────────────────────────
+  // ── Send → await n8n HTTP response directly ───────────────────────────────
   const sendMessage = async (text) => {
     const trimmed = (text || '').trim();
     if (!trimmed || isWaiting) return;
 
     setInput('');
+
+    // Show user message in UI immediately (optimistic)
+    const userMsgId = `u-${Date.now()}`;
+    setMessages((prev) => [...prev, { id: userMsgId, role: 'user', content: trimmed }]);
     setIsWaiting(true);
 
     try {
-      await fetch(N8N_WEBHOOK_URL, {
+      const res = await fetch(N8N_WEBHOOK_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          sessionId: user.username, // n8n uses this as memory session key
           userId: user.id,
           username: user.username,
           message: trimmed,
         }),
       });
-    } catch {
-      setIsWaiting(false);
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      const data = await res.json();
+      const replyText = extractReply(data);
+
+      setMessages((prev) => [
+        ...prev,
+        { id: `a-${Date.now()}`, role: 'assistant', content: replyText },
+      ]);
+    } catch (err) {
       setMessages((prev) => [
         ...prev,
         {
           id: `err-${Date.now()}`,
           role: 'assistant',
-          content: 'Не удалось подключиться к серверу. Проверьте соединение.',
+          content: 'Ошибка при получении ответа. Попробуйте снова.',
         },
       ]);
-      return;
-    }
-
-    // Timeout fallback if n8n never responds
-    clearTimeout(timeoutRef.current);
-    timeoutRef.current = setTimeout(() => {
+    } finally {
       setIsWaiting(false);
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `timeout-${Date.now()}`,
-          role: 'assistant',
-          content: 'Ответ не получен в течение 90 секунд. Попробуйте позже.',
-        },
-      ]);
-    }, REPLY_TIMEOUT_MS);
+    }
   };
 
   const onSubmit = (e) => {
@@ -225,9 +201,7 @@ export default function ChatPanel() {
                     <div
                       className={cn(
                         'w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5',
-                        m.role === 'user'
-                          ? 'bg-primary/20'
-                          : 'bg-muted border border-white/10'
+                        m.role === 'user' ? 'bg-primary/20' : 'bg-muted border border-white/10'
                       )}
                     >
                       {m.role === 'user' ? (
@@ -249,7 +223,7 @@ export default function ChatPanel() {
                   </div>
                 ))}
 
-                {/* Typing indicator while waiting for n8n */}
+                {/* Typing indicator */}
                 {isWaiting && (
                   <div className="flex gap-2 items-start">
                     <div className="w-7 h-7 rounded-full bg-muted border border-white/10 flex items-center justify-center flex-shrink-0 mt-0.5">

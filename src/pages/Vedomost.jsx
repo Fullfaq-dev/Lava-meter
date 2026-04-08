@@ -1,7 +1,8 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { METERS, MONTHS } from "@/lib/meterConfig";
-import { listReadings, listProduction } from "@/lib/supabaseApi";
+import { listReadings, listProduction, upsertLineSummary } from "@/lib/supabaseApi";
+import { supabase } from "@/api/supabaseClient";
 import { calcLineConsumption } from "@/lib/consumptionCalc";
 import { FRICOOLER_GROUPS } from "@/lib/productionConfig";
 import GlassCard from "../components/layout/GlassCard";
@@ -35,18 +36,92 @@ export default function Vedomost() {
   const [selectedYear, setSelectedYear] = useState(defaultYear);
   const [filter, setFilter] = useState("all");
 
-  const { data: readings, isLoading } = useQuery({
+  const { data: readings, isLoading: readingsLoading } = useQuery({
     queryKey: ['readings-sb', selectedYear, selectedMonth],
     queryFn: () => listReadings({ year: selectedYear, month: selectedMonth }),
     initialData: [],
   });
 
-  const { data: production } = useQuery({
+  const { data: production, isLoading: productionLoading } = useQuery({
     queryKey: ['production-sb', selectedYear, selectedMonth],
     queryFn: () => listProduction({ year: selectedYear, month: selectedMonth }).then(rows => rows[0] || null),
   });
 
+  const { data: energyReport, isLoading: energyLoading } = useQuery({
+    queryKey: ['energy-report-sb', selectedYear, selectedMonth],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("energy_reports")
+        .select("vazma_active_kwh,vazma_active_rosseti_rub,vazma_active_atom_rub")
+        .eq("year", selectedYear)
+        .eq("month", selectedMonth)
+        .maybeSingle();
+      return data || null;
+    },
+  });
+
+  // Фактическая стоимость 1 кВт·ч (Вязьма-2), совпадает с расчётом в EnergyReportInput
+  const er = /** @type {any} */ (energyReport);
+  const vazmaCostPerKwh =
+    er?.vazma_active_kwh > 0
+      ? ((er.vazma_active_rosseti_rub ?? 0) + (er.vazma_active_atom_rub ?? 0)) /
+        er.vazma_active_kwh
+      : null;
+
+  const isLoading = readingsLoading || productionLoading;
+
   const lineCalc = calcLineConsumption(readings, production);
+
+  // Авто-сохранение итогов по ВСЕМ счётчикам в БД после загрузки данных.
+  // useRef позволяет не сохранять повторно при ре-рендерах без смены данных.
+  const lastSavedKey = useRef("");
+
+  useEffect(() => {
+    if (readingsLoading || productionLoading || energyLoading) return;
+    if (!readings || readings.length === 0) return;
+
+    const key = `${selectedYear}__${selectedMonth}`;
+    if (lastSavedKey.current === key) return;
+    lastSavedKey.current = key;
+
+    const now = new Date().toISOString();
+    const rows = METERS.map((meter) => {
+      const reading          = readings.find((r) => r.meter_number === meter.number);
+      const lcRow            = lineCalc.find((r) => r.meter_number === meter.number);
+      const rawConsumption   = reading?.consumption ?? null;
+      const totalConsumption = lcRow ? lcRow.total_consumption : rawConsumption;
+      const costRub =
+        totalConsumption != null && vazmaCostPerKwh != null
+          ? Math.round(totalConsumption * vazmaCostPerKwh * 100) / 100
+          : null;
+
+      return {
+        year:                   selectedYear,
+        month:                  selectedMonth,
+        meter_number:           meter.number,
+        meter_code:             meter.code,
+        meter_name:             meter.name,
+        raw_consumption:        rawConsumption,
+        total_consumption:      totalConsumption,
+        // FCL-specific (null для не-FCL счётчиков)
+        fcl:                    lcRow?.fcl                    ?? null,
+        own_consumption:        lcRow?.own_consumption        ?? null,
+        fricooler_meter_number: lcRow?.fricooler_meter_number ?? null,
+        fricooler_consumption:  lcRow?.fricooler_consumption  ?? null,
+        fricooler_share:        lcRow?.fricooler_share        ?? null,
+        output_kg:              lcRow?.output_kg              ?? null,
+        share_pct:              lcRow?.share_pct              ?? null,
+        // Стоимость ЭЭ (null если тариф не введён)
+        cost_per_kwh:           vazmaCostPerKwh               ?? null,
+        cost_rub:               costRub,
+        calculated_at:          now,
+      };
+    });
+
+    upsertLineSummary(rows).catch((err) => {
+      console.error("[meter_line_summary] Ошибка сохранения расчёта:", err);
+    });
+  }, [readingsLoading, productionLoading, energyLoading, selectedYear, selectedMonth, readings, lineCalc, vazmaCostPerKwh]);
 
   const getReadingForMeter = (meterNumber) =>
     readings.find(r => r.meter_number === meterNumber) || null;
