@@ -69,12 +69,26 @@ export default async function handler(req) {
     maxTokens: 1024,
   });
 
-  // Return plain text stream — simplest format for the client to consume
-  return new Response(result.textStream, {
+  // Edge runtime requires ReadableStream<Uint8Array>, not ReadableStream<string>.
+  // Use a TransformStream to encode text chunks to bytes on the fly.
+  const encoder = new TextEncoder();
+  const { readable, writable } = new TransformStream();
+  const writer = writable.getWriter();
+
+  (async () => {
+    try {
+      for await (const chunk of result.textStream) {
+        await writer.write(encoder.encode(chunk));
+      }
+    } finally {
+      await writer.close();
+    }
+  })();
+
+  return new Response(readable, {
     headers: {
       'Content-Type': 'text/plain; charset=utf-8',
       'Cache-Control': 'no-cache',
-      'X-Content-Type-Options': 'nosniff',
     },
   });
 }
