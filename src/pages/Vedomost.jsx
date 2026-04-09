@@ -73,14 +73,23 @@ export default function Vedomost() {
   const lineCalc = calcLineConsumption(readings, production);
 
   // Авто-сохранение итогов по ВСЕМ счётчикам в БД после загрузки данных.
-  // useRef позволяет не сохранять повторно при ре-рендерах без смены данных.
+  // Ключ включает хэш показаний и тариф — срабатывает при любом изменении данных.
   const lastSavedKey = useRef("");
 
   useEffect(() => {
     if (readingsLoading || productionLoading || energyLoading) return;
     if (!readings || readings.length === 0) return;
 
-    const key = `${selectedYear}__${selectedMonth}`;
+    // Content-aware ключ: включает хэш данных, чтобы срабатывать при изменениях
+    const readingsHash = readings.reduce(
+      (s, r) => s + r.meter_number * 1000 + (r.consumption || 0),
+      0
+    );
+    const productionHash = production
+      ? Object.values(production).reduce((s, v) => s + (Number(v) || 0), 0)
+      : 0;
+    const key = `${selectedYear}__${selectedMonth}__r${readingsHash}__p${productionHash}__v${vazmaCostPerKwh ?? 0}`;
+
     if (lastSavedKey.current === key) return;
     lastSavedKey.current = key;
 
@@ -121,7 +130,7 @@ export default function Vedomost() {
     upsertLineSummary(rows).catch((err) => {
       console.error("[meter_line_summary] Ошибка сохранения расчёта:", err);
     });
-  }, [readingsLoading, productionLoading, energyLoading, selectedYear, selectedMonth, readings, lineCalc, vazmaCostPerKwh]);
+  }, [readingsLoading, productionLoading, energyLoading, selectedYear, selectedMonth, readings, production, lineCalc, vazmaCostPerKwh]);
 
   const getReadingForMeter = (meterNumber) =>
     readings.find(r => r.meter_number === meterNumber) || null;

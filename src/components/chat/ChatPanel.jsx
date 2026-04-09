@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/lib/AuthContext';
 import { supabase } from '@/api/supabaseClient';
+import { syncAllMonthsToLineSummary } from '@/lib/supabaseApi';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -32,12 +33,18 @@ export default function ChatPanel() {
   const [input, setInput] = useState('');
   const [isWaiting, setIsWaiting] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const messagesEndRef = useRef(null);
 
-  // ── Load history from Supabase when panel opens ───────────────────────────
+  // ── Load history + sync summary when panel opens ─────────────────────────
   useEffect(() => {
     if (!open || !user?.username) return;
     loadHistory();
+    // Синхронизируем meter_line_summary по всем месяцам при каждом открытии чата
+    setSyncing(true);
+    syncAllMonthsToLineSummary()
+      .catch((err) => console.error('[sync] Ошибка синхронизации meter_line_summary:', err))
+      .finally(() => setSyncing(false));
   }, [open, user?.username]);
 
   // ── Scroll to bottom ─────────────────────────────────────────────────────
@@ -124,6 +131,7 @@ export default function ChatPanel() {
       {/* Floating action button */}
       <Button
         onClick={() => setOpen(true)}
+        disabled={syncing}
         className="fixed bottom-6 right-6 z-40 rounded-full w-14 h-14 shadow-xl shadow-primary/25 bg-primary hover:bg-primary/90 hover:scale-105 transition-all duration-200"
         size="icon"
         aria-label="Открыть ИИ-ассистент"
@@ -140,14 +148,16 @@ export default function ChatPanel() {
           <SheetHeader className="px-4 py-3 border-b border-white/10 flex-shrink-0">
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-xl bg-primary/15 border border-primary/25 flex items-center justify-center">
-                <Bot className="w-5 h-5 text-primary" />
+                {syncing ? <Loader2 className="w-5 h-5 text-primary animate-spin" /> : <Bot className="w-5 h-5 text-primary" />}
               </div>
               <div className="text-left">
                 <SheetTitle className="text-sm font-semibold leading-tight">
                   ИИ Ассистент
                 </SheetTitle>
                 <p className="text-xs text-muted-foreground leading-tight">
-                  {user?.username ? `Сессия: ${user.username}` : 'Система мониторинга «Лава»'}
+                  {syncing
+                    ? 'Синхронизация данных…'
+                    : user?.username ? `Сессия: ${user.username}` : 'Система мониторинга «Лава»'}
                 </p>
               </div>
             </div>
