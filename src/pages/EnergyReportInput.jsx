@@ -66,29 +66,32 @@ export default function EnergyReportInput() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // Вспомогательная функция для формирования строки EE_REPORT
-  // Используется как при ручном сохранении, так и при синхронизации
+  // Вспомогательная функция для формирования строки EE_REPORT.
+  // raw_consumption   = vazma_active_kwh     (прямо из energy_reports, ПС Вязьма-2)
+  // total_consumption = vazma + ec_produced  (итого поступило из обоих источников)
   const buildEeRow = (f, year, month, readings, lineCalcRows) => {
+    const rawConsumptionEe  = f.vazma_active_kwh ?? null;
+    const totalKwhVazmaEc   = (f.vazma_active_kwh ?? 0) + (f.ec_produced_kwh ?? 0);
+
+    const localSnTotal =
+      (f.sn_zavod_kwh           ?? 0) +
+      (f.sn_energocenter_kwh    ?? 0) +
+      (f.losses_cable_kwh       ?? 0) +
+      (f.losses_transformer_kwh ?? 0) +
+      (f.boiler_kwh             ?? 0);
+
+    // Итог по ведомости (для справки в extra_data)
     const localVedomostTotal = (readings || []).reduce((sum, r) => {
       if ([2, 3, 12].includes(r.meter_number)) return sum;
       const fclRow = (lineCalcRows || []).find((lc) => lc.meter_number === r.meter_number);
       return sum + (fclRow ? fclRow.total_consumption : (r.consumption || 0));
     }, 0);
 
-    const localSnTotal =
-      (f.sn_zavod_kwh       ?? 0) +
-      (f.sn_energocenter_kwh ?? 0) +
-      (f.losses_cable_kwh    ?? 0) +
-      (f.losses_transformer_kwh ?? 0) +
-      (f.boiler_kwh          ?? 0);
-
-    const localTotalKwh        = localVedomostTotal + localSnTotal;
-    const localTotalKwhVazmaEc = (f.vazma_active_kwh ?? 0) + (f.ec_produced_kwh ?? 0);
-    const localTotalCost       =
+    const localTotalCost =
       (f.vazma_active_rosseti_rub ?? 0) +
       (f.vazma_active_atom_rub    ?? 0) +
       (f.ec_gas_payment_rub       ?? 0);
-    const localTotalCostPerKwh = localTotalKwh > 0 ? localTotalCost / localTotalKwh : null;
+    const localTotalCostPerKwh = totalKwhVazmaEc > 0 ? localTotalCost / totalKwhVazmaEc : null;
     const localVazmaCostPerKwh =
       f.vazma_active_kwh > 0
         ? ((f.vazma_active_rosseti_rub ?? 0) + (f.vazma_active_atom_rub ?? 0)) / f.vazma_active_kwh
@@ -104,8 +107,9 @@ export default function EnergyReportInput() {
       meter_number: 0,
       meter_code:   "EE_REPORT",
       meter_name:   "Ведомость потребления ЭЭ — месячный итог",
-      raw_consumption:   localVedomostTotal,
-      total_consumption: localTotalKwh,
+      // Прямые данные из energy_reports (форма)
+      raw_consumption:   rawConsumptionEe,   // Вязьма-2 кВтч
+      total_consumption: totalKwhVazmaEc,    // Вязьма-2 + Энергоцентр кВтч
       cost_per_kwh:      localTotalCostPerKwh ?? null,
       cost_rub:          localTotalCost,
       extra_data: {
@@ -127,8 +131,7 @@ export default function EnergyReportInput() {
         ec_gas_per_m3:              localEcGasPerM3             ?? null,
         ec_gas_per_1000m3:          localEcGasPerM3 != null ? localEcGasPerM3 * 1000 : null,
         sn_total_kwh:               localSnTotal,
-        total_kwh_vazma_ec:         localTotalKwhVazmaEc,
-        total_kwh:                  localTotalKwh,
+        total_kwh_vazma_ec:         totalKwhVazmaEc,
         vedomost_total_kwh:         localVedomostTotal,
         total_cost_rub:             localTotalCost,
         total_cost_per_kwh:         localTotalCostPerKwh        ?? null,
