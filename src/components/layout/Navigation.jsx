@@ -1,8 +1,9 @@
 import React from "react";
-import { Link, useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { TableProperties, PenLine, BarChart3, Zap, PackageOpen, FileText, LogOut, Calculator } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/AuthContext";
+import { useUnsavedChanges } from "@/lib/UnsavedChangesContext";
 import { Button } from "@/components/ui/button";
 
 const navItems = [
@@ -16,7 +17,9 @@ const navItems = [
 
 export default function Navigation() {
   const location = useLocation();
+  const navigate = useNavigate();
   const { user, logout } = useAuth();
+  const { requestLeave } = useUnsavedChanges();
 
   const filteredNavItems = navItems.filter((item) => {
     if (!user) return false;
@@ -24,6 +27,15 @@ export default function Navigation() {
     if (item.accessKey === "access_ic_calculation" && user.access_energy_report) return true;
     return false;
   });
+
+  const goTo = (path) => {
+    if (location.pathname === path) return;
+    requestLeave(() => navigate(path));
+  };
+
+  const handleLogout = () => {
+    requestLeave(() => logout());
+  };
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 md:fixed md:top-0 md:bottom-auto">
@@ -41,9 +53,10 @@ export default function Navigation() {
               const Icon = item.icon;
               const isActive = location.pathname === item.path;
               return (
-                <Link
+                <button
                   key={item.path}
-                  to={item.path}
+                  type="button"
+                  onClick={() => goTo(item.path)}
                   className={cn(
                     "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-300",
                     isActive
@@ -53,14 +66,14 @@ export default function Navigation() {
                 >
                   <Icon className="w-4 h-4" />
                   {item.label}
-                </Link>
+                </button>
               );
             })}
           </div>
           {user && (
             <div className="flex items-center gap-4 ml-auto">
               <span className="text-sm text-muted-foreground">{user.username}</span>
-              <Button variant="ghost" size="icon" onClick={logout} title="Выйти">
+              <Button variant="ghost" size="icon" onClick={handleLogout} title="Выйти">
                 <LogOut className="w-4 h-4" />
               </Button>
             </div>
@@ -73,9 +86,10 @@ export default function Navigation() {
             const Icon = item.icon;
             const isActive = location.pathname === item.path;
             return (
-              <Link
+              <button
                 key={item.path}
-                to={item.path}
+                type="button"
+                onClick={() => goTo(item.path)}
                 className={cn(
                   "flex flex-col items-center gap-1 px-3 py-1.5 rounded-xl text-[10px] font-medium transition-all duration-300",
                   isActive
@@ -85,7 +99,7 @@ export default function Navigation() {
               >
                 <Icon className="w-5 h-5" />
                 {item.label}
-              </Link>
+              </button>
             );
           })}
         </div>

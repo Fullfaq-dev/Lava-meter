@@ -1,14 +1,19 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { MONTHS } from "@/lib/meterConfig";
 import { PRODUCTION_LINES, brakKey } from "@/lib/productionConfig";
 import { listProduction, upsertProduction } from "@/lib/supabaseApi";
+import { isFormDirty, snapshotForm } from "@/lib/formDirty";
+import { useUnsavedGuard } from "@/lib/UnsavedChangesContext";
 import GlassCard from "../components/layout/GlassCard";
 import MonthSelector from "../components/table/MonthSelector";
+import SaveReminderBanner from "../components/layout/SaveReminderBanner";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Save, Loader2, Check } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/AuthContext";
+
+const FIELD_KEYS = PRODUCTION_LINES.flatMap(({ key }) => [key, brakKey(key)]);
 
 function KgInput({ label, value, onChange, disabled, muted }) {
   return (
@@ -33,6 +38,16 @@ function KgInput({ label, value, onChange, disabled, muted }) {
   );
 }
 
+function normalizeValues(values) {
+  const out = {};
+  FIELD_KEYS.forEach((key) => {
+    const v = values[key];
+    out[key] = v !== undefined && v !== "" && v != null ? parseFloat(v) : null;
+    if (out[key] != null && Number.isNaN(out[key])) out[key] = null;
+  });
+  return out;
+}
+
 export default function ProductionInput() {
   const { user } = useAuth();
   const canEdit = user?.can_edit;
@@ -43,6 +58,7 @@ export default function ProductionInput() {
   const [selectedMonth, setSelectedMonth] = useState(MONTHS[defaultMonthIndex]);
   const [selectedYear, setSelectedYear] = useState(defaultYear);
   const [values, setValues] = useState({});
+  const [savedSnapshot, setSavedSnapshot] = useState({});
   const [hasExisting, setHasExisting] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -61,9 +77,11 @@ export default function ProductionInput() {
             if (row[bk] !== null && row[bk] !== undefined) vals[bk] = row[bk];
           });
           setValues(vals);
+          setSavedSnapshot(snapshotForm(normalizeValues(vals), FIELD_KEYS));
         } else {
           setHasExisting(false);
           setValues({});
+          setSavedSnapshot(snapshotForm({}, FIELD_KEYS));
         }
       })
       .finally(() => setLoading(false));
@@ -72,27 +90,43 @@ export default function ProductionInput() {
   const setField = (key) => (raw) =>
     setValues((prev) => ({ ...prev, [key]: raw }));
 
-  const handleSave = async () => {
+  const isDirty = useMemo(
+    () =>
+      !loading &&
+      canEdit &&
+      isFormDirty(normalizeValues(values), savedSnapshot, FIELD_KEYS),
+    [loading, canEdit, values, savedSnapshot]
+  );
+
+  const handleSave = useCallback(async () => {
     setSaving(true);
-    const payload = { year: selectedYear, month: selectedMonth };
-    PRODUCTION_LINES.forEach(({ key }) => {
-      const v = values[key];
-      payload[key] = v !== undefined && v !== "" ? parseFloat(v) : null;
-      const bk = brakKey(key);
-      const bv = values[bk];
-      payload[bk] = bv !== undefined && bv !== "" ? parseFloat(bv) : null;
-    });
+    const normalized = normalizeValues(values);
+    const payload = { year: selectedYear, month: selectedMonth, ...normalized };
     try {
       await upsertProduction(payload);
       setHasExisting(true);
+      setSavedSnapshot(snapshotForm(normalized, FIELD_KEYS));
+      setValues(
+        Object.fromEntries(
+          Object.entries(normalized).filter(([, v]) => v != null)
+        )
+      );
       toast.success(`Выпуск за ${selectedMonth} ${selectedYear} сохранён в Supabase`);
     } catch (err) {
       console.error("[ProductionInput] save error:", err);
       toast.error("Ошибка сохранения. Проверьте, что миграция брака выполнена в Supabase.");
+      throw err;
     } finally {
       setSaving(false);
     }
-  };
+  }, [values, selectedYear, selectedMonth]);
+
+  const { requestLeave } = useUnsavedGuard({
+    isDirty,
+    onSave: handleSave,
+    saving,
+    enabled: !!canEdit,
+  });
 
   return (
     <div className="space-y-6">
@@ -111,9 +145,19 @@ export default function ProductionInput() {
             selectedYear={selectedYear}
             onMonthChange={setSelectedMonth}
             onYearChange={setSelectedYear}
+            confirmChange={requestLeave}
           />
         </GlassCard>
       </div>
+
+      {canEdit && (
+        <SaveReminderBanner
+          onSave={handleSave}
+          saving={saving}
+          disabled={loading}
+          isDirty={isDirty}
+        />
+      )}
 
       {loading ? (
         <div className="flex items-center justify-center py-20">

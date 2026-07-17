@@ -1,9 +1,11 @@
-import React, { useState } from "react";
+import React, { useState, useMemo, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { METERS, MONTHS } from "@/lib/meterConfig";
 import { listReadings, upsertReadings, deleteReading } from "@/lib/supabaseApi";
+import { useUnsavedGuard } from "@/lib/UnsavedChangesContext";
 import GlassCard from "../components/layout/GlassCard";
 import MonthSelector from "../components/table/MonthSelector";
+import SaveReminderBanner from "../components/layout/SaveReminderBanner";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -24,22 +26,34 @@ export default function DataInput() {
   const [inputValues, setInputValues] = useState({});
   const [searchQuery, setSearchQuery] = useState("");
   const [savingMeter, setSavingMeter] = useState(null);
+  const [savingAll, setSavingAll] = useState(false);
   const queryClient = useQueryClient();
 
   const { data: readings, isLoading } = useQuery({
-    queryKey: ['readings-sb', selectedYear, selectedMonth],
+    queryKey: ["readings-sb", selectedYear, selectedMonth],
     queryFn: () => listReadings({ year: selectedYear, month: selectedMonth }),
     initialData: [],
   });
 
   const getExistingReading = (meterNumber) =>
-    readings.find(r => r.meter_number === meterNumber);
+    readings.find((r) => r.meter_number === meterNumber);
 
-  const handleSave = async (meter) => {
-    const value = inputValues[meter.number];
-    if (value === undefined || value === "") return;
+  const pendingMeters = useMemo(
+    () =>
+      METERS.filter((m) => {
+        const v = inputValues[m.number];
+        return v !== undefined && v !== "" && !isNaN(parseFloat(v));
+      }),
+    [inputValues]
+  );
+
+  const isDirty = canEdit && pendingMeters.length > 0;
+
+  const saveMeter = async (meter, valueOverride) => {
+    const value = valueOverride ?? inputValues[meter.number];
+    if (value === undefined || value === "") return false;
     const currentReading = parseFloat(value);
-    if (isNaN(currentReading)) return;
+    if (isNaN(currentReading)) return false;
 
     setSavingMeter(meter.number);
 
@@ -70,28 +84,87 @@ export default function DataInput() {
       current_reading: currentReading,
     });
 
-    queryClient.invalidateQueries({ queryKey: ['readings-sb', selectedYear, selectedMonth] });
     setSavingMeter(null);
-    setInputValues(prev => ({ ...prev, [meter.number]: "" }));
-    toast.success(`${meter.code} сохранён в Supabase`);
+    setInputValues((prev) => {
+      const next = { ...prev };
+      delete next[meter.number];
+      return next;
+    });
+    return true;
   };
+
+  const handleSave = async (meter) => {
+    try {
+      const ok = await saveMeter(meter);
+      if (!ok) return;
+      queryClient.invalidateQueries({ queryKey: ["readings-sb", selectedYear, selectedMonth] });
+      toast.success(`${meter.code} сохранён в Supabase`);
+    } catch (err) {
+      setSavingMeter(null);
+      console.error("[DataInput] save error:", err);
+      toast.error("Ошибка при сохранении");
+      throw err;
+    }
+  };
+
+  const handleSaveAll = useCallback(async () => {
+    if (pendingMeters.length === 0) {
+      toast.message("Нет несохранённых показаний");
+      return;
+    }
+    setSavingAll(true);
+    try {
+      // снимок, чтобы цикл не зависел от асинхронных clear
+      const toSave = pendingMeters.map((m) => ({
+        meter: m,
+        value: inputValues[m.number],
+      }));
+      for (const { meter, value } of toSave) {
+        await saveMeter(meter, value);
+      }
+      queryClient.invalidateQueries({ queryKey: ["readings-sb", selectedYear, selectedMonth] });
+      toast.success(`Сохранено показаний: ${toSave.length}`);
+    } catch (err) {
+      console.error("[DataInput] save all error:", err);
+      toast.error("Ошибка при сохранении");
+      throw err;
+    } finally {
+      setSavingAll(false);
+      setSavingMeter(null);
+    }
+  }, [pendingMeters, inputValues, selectedYear, selectedMonth, queryClient]);
+
+  const { requestLeave } = useUnsavedGuard({
+    isDirty,
+    onSave: handleSaveAll,
+    saving: savingAll,
+    enabled: !!canEdit,
+  });
 
   const handleDelete = async (existingId, meterCode) => {
     if (!confirm(`Удалить показания для ${meterCode}?`)) return;
     try {
       await deleteReading(existingId);
-      queryClient.invalidateQueries({ queryKey: ['readings-sb', selectedYear, selectedMonth] });
+      queryClient.invalidateQueries({ queryKey: ["readings-sb", selectedYear, selectedMonth] });
       toast.success(`${meterCode} удалён`);
     } catch (error) {
       toast.error(`Ошибка при удалении: ${error.message}`);
     }
   };
 
-  const filteredMeters = METERS.filter(m =>
-    searchQuery === "" ||
-    m.code.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    m.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    m.number.toString().includes(searchQuery)
+  const changeMonth = (fn) => {
+    requestLeave(() => {
+      setInputValues({});
+      fn();
+    });
+  };
+
+  const filteredMeters = METERS.filter(
+    (m) =>
+      searchQuery === "" ||
+      m.code.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      m.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      m.number.toString().includes(searchQuery)
   );
 
   return (
@@ -111,9 +184,19 @@ export default function DataInput() {
             selectedYear={selectedYear}
             onMonthChange={setSelectedMonth}
             onYearChange={setSelectedYear}
+            confirmChange={changeMonth}
           />
         </GlassCard>
       </div>
+
+      {canEdit && (
+        <SaveReminderBanner
+          onSave={handleSaveAll}
+          saving={savingAll}
+          disabled={isLoading}
+          isDirty={isDirty}
+        />
+      )}
 
       <div className="relative">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -134,6 +217,7 @@ export default function DataInput() {
           {filteredMeters.map((meter) => {
             const existing = getExistingReading(meter.number);
             const hasData = !!existing;
+            const hasDraft = inputValues[meter.number] !== undefined && inputValues[meter.number] !== "";
 
             return (
               <GlassCard key={meter.number} className="p-4">
@@ -162,18 +246,20 @@ export default function DataInput() {
                     <p className="text-muted-foreground">Нач. пок.</p>
                     <p className="font-medium text-foreground tabular-nums">
                       {existing
-                        ? existing.initial_reading?.toLocaleString('ru-RU')
-                        : (meter.initialReading?.toLocaleString('ru-RU') || '—')}
+                        ? existing.initial_reading?.toLocaleString("ru-RU")
+                        : meter.initialReading?.toLocaleString("ru-RU") || "—"}
                     </p>
                   </div>
                   {hasData && (
                     <div>
                       <p className="text-muted-foreground">Расход</p>
-                      <p className={cn(
-                        "font-bold tabular-nums",
-                        existing.consumption > 0 ? "text-primary" : "text-destructive"
-                      )}>
-                        {existing.consumption?.toLocaleString('ru-RU')}
+                      <p
+                        className={cn(
+                          "font-bold tabular-nums",
+                          existing.consumption > 0 ? "text-primary" : "text-destructive"
+                        )}
+                      >
+                        {existing.consumption?.toLocaleString("ru-RU")}
                       </p>
                     </div>
                   )}
@@ -184,9 +270,14 @@ export default function DataInput() {
                     type="number"
                     placeholder={hasData ? existing.current_reading?.toString() : "Показание..."}
                     value={inputValues[meter.number] || ""}
-                    onChange={(e) => setInputValues(prev => ({ ...prev, [meter.number]: e.target.value }))}
-                    className="bg-white/5 border-white/10 text-sm tabular-nums"
-                    onKeyDown={(e) => e.key === 'Enter' && handleSave(meter)}
+                    onChange={(e) =>
+                      setInputValues((prev) => ({ ...prev, [meter.number]: e.target.value }))
+                    }
+                    className={cn(
+                      "bg-white/5 border-white/10 text-sm tabular-nums",
+                      hasDraft && "border-amber-500/40"
+                    )}
+                    onKeyDown={(e) => e.key === "Enter" && handleSave(meter)}
                     disabled={!canEdit}
                   />
                   {canEdit && (

@@ -1,11 +1,14 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { MONTHS } from "@/lib/meterConfig";
 import { supabase } from "@/api/supabaseClient";
 import { listReadings, listProduction, upsertLineSummary } from "@/lib/supabaseApi";
 import { calcLineConsumption } from "@/lib/consumptionCalc";
+import { isFormDirty, snapshotForm } from "@/lib/formDirty";
+import { useUnsavedGuard } from "@/lib/UnsavedChangesContext";
 import GlassCard from "../components/layout/GlassCard";
 import MonthSelector from "../components/table/MonthSelector";
+import SaveReminderBanner from "../components/layout/SaveReminderBanner";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Save, Loader2, Check, Zap, Factory, Flame, Download } from "lucide-react";
@@ -13,6 +16,22 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { exportEnergyReportToExcel } from "@/lib/exportExcel";
 import { useAuth } from "@/lib/AuthContext";
+
+const ENERGY_FORM_KEYS = [
+  "vazma_active_kwh",
+  "vazma_active_rosseti_rub",
+  "vazma_active_atom_rub",
+  "vazma_reactive_kwh",
+  "vazma_reactive_rosseti_rub",
+  "sn_zavod_kwh",
+  "sn_energocenter_kwh",
+  "losses_cable_kwh",
+  "losses_transformer_kwh",
+  "boiler_kwh",
+  "ec_produced_kwh",
+  "ec_gas_payment_rub",
+  "ec_gas_volume_m3",
+];
 
 const fmt = (v) =>
   v != null && !isNaN(v) ? Number(v).toLocaleString("ru-RU", { maximumFractionDigits: 2 }) : "—";
@@ -62,6 +81,7 @@ export default function EnergyReportInput() {
   const [selectedMonth, setSelectedMonth] = useState(MONTHS[defaultMonthIndex]);
   const [selectedYear, setSelectedYear] = useState(defaultYear);
   const [form, setForm] = useState({});
+  const [savedSnapshot, setSavedSnapshot] = useState({});
   const [existingId, setExistingId] = useState(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -171,7 +191,7 @@ export default function EnergyReportInput() {
         if (rows.length > 0) {
           const row = rows[0];
           setExistingId(row.id);
-          setForm({
+          const next = {
             vazma_active_kwh: row.vazma_active_kwh,
             vazma_active_rosseti_rub: row.vazma_active_rosseti_rub,
             vazma_active_atom_rub: row.vazma_active_atom_rub,
@@ -185,16 +205,24 @@ export default function EnergyReportInput() {
             ec_produced_kwh: row.ec_produced_kwh,
             ec_gas_payment_rub: row.ec_gas_payment_rub,
             ec_gas_volume_m3: row.ec_gas_volume_m3,
-          });
+          };
+          setForm(next);
+          setSavedSnapshot(snapshotForm(next, ENERGY_FORM_KEYS));
         } else {
           setExistingId(null);
           setForm({});
+          setSavedSnapshot(snapshotForm({}, ENERGY_FORM_KEYS));
         }
       })
       .finally(() => setLoading(false));
   }, [selectedYear, selectedMonth]);
 
-  const handleSave = async () => {
+  const isDirty = useMemo(
+    () => !loading && canEdit && isFormDirty(form, savedSnapshot, ENERGY_FORM_KEYS),
+    [loading, canEdit, form, savedSnapshot]
+  );
+
+  const handleSave = useCallback(async () => {
     setSaving(true);
     try {
       const payload = { year: selectedYear, month: selectedMonth, ...form };
@@ -210,14 +238,23 @@ export default function EnergyReportInput() {
       const eeRow = buildEeRow(form, selectedYear, selectedMonth, readings, lineCalc);
       await upsertLineSummary([eeRow]);
 
+      setSavedSnapshot(snapshotForm(form, ENERGY_FORM_KEYS));
       toast.success(`Данные за ${selectedMonth} ${selectedYear} сохранены`);
     } catch (err) {
       console.error("[EnergyReportInput] Ошибка сохранения:", err);
       toast.error("Ошибка при сохранении данных");
+      throw err;
     } finally {
       setSaving(false);
     }
-  };
+  }, [form, selectedYear, selectedMonth, existingId, readings, lineCalc]);
+
+  const { requestLeave } = useUnsavedGuard({
+    isDirty,
+    onSave: handleSave,
+    saving,
+    enabled: !!canEdit,
+  });
 
   // ── Расчёты ────────────────────────────────────────────────────
   const f = form;
@@ -294,10 +331,20 @@ export default function EnergyReportInput() {
               selectedYear={selectedYear}
               onMonthChange={setSelectedMonth}
               onYearChange={setSelectedYear}
+              confirmChange={requestLeave}
             />
           </GlassCard>
         </div>
       </div>
+
+      {canEdit && (
+        <SaveReminderBanner
+          onSave={handleSave}
+          saving={saving}
+          disabled={loading}
+          isDirty={isDirty}
+        />
+      )}
 
       {loading ? (
         <div className="flex items-center justify-center py-20">

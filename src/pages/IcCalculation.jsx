@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { MONTHS } from "@/lib/meterConfig";
 import { supabase } from "@/api/supabaseClient";
 import { buildIcCalculation, getPrevMonth, getIcMissingFields, buildIcFormFromDb } from "@/lib/icCalc";
@@ -7,14 +7,19 @@ import {
   IC_HEATING_TARIFF_PER_GCAL,
 } from "@/lib/icConfig";
 import { exportIcReportWord } from "@/lib/exportWordIc";
+import { isFormDirty, snapshotForm } from "@/lib/formDirty";
+import { useUnsavedGuard } from "@/lib/UnsavedChangesContext";
 import GlassCard from "../components/layout/GlassCard";
 import MonthSelector from "../components/table/MonthSelector";
+import SaveReminderBanner from "../components/layout/SaveReminderBanner";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Save, Loader2, Check, Calculator, Download, Zap, Droplets, Flame, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/AuthContext";
+
+const IC_SAVED_KEYS = ["ee_reading", "water_reading", "heating_reading", "residents_count"];
 
 const fmt = (v, digits = 2) =>
   v != null && !isNaN(v)
@@ -77,6 +82,7 @@ export default function IcCalculation() {
   const [selectedMonth, setSelectedMonth] = useState(MONTHS[defaultMonthIndex]);
   const [selectedYear, setSelectedYear] = useState(defaultYear);
   const [form, setForm] = useState({});
+  const [savedSnapshot, setSavedSnapshot] = useState({});
   const [prevForm, setPrevForm] = useState(null);
   const [energyReport, setEnergyReport] = useState(null);
   const [existingId, setExistingId] = useState(null);
@@ -132,10 +138,14 @@ export default function IcCalculation() {
 
         if (icRes.data) {
           setExistingId(icRes.data.id);
-          setForm(buildIcFormFromDb(icRes.data));
+          const next = buildIcFormFromDb(icRes.data);
+          setForm(next);
+          setSavedSnapshot(snapshotForm(next, IC_SAVED_KEYS));
         } else {
           setExistingId(null);
-          setForm(buildIcFormFromDb(null));
+          const next = buildIcFormFromDb(null);
+          setForm(next);
+          setSavedSnapshot(snapshotForm(next, IC_SAVED_KEYS));
         }
 
         setPrevForm(prevRes.data || null);
@@ -150,7 +160,12 @@ export default function IcCalculation() {
     load();
   }, [selectedYear, selectedMonth, prevMonth?.year, prevMonth?.month]);
 
-  const handleSave = async () => {
+  const isDirty = useMemo(
+    () => !loading && canEdit && isFormDirty(form, savedSnapshot, IC_SAVED_KEYS),
+    [loading, canEdit, form, savedSnapshot]
+  );
+
+  const handleSave = useCallback(async () => {
     setSaving(true);
     try {
       const water = form.water_reading ?? null;
@@ -173,14 +188,23 @@ export default function IcCalculation() {
         setExistingId(data.id);
       }
 
+      setSavedSnapshot(snapshotForm(form, IC_SAVED_KEYS));
       toast.success(`Данные за ${selectedMonth} ${selectedYear} сохранены`);
     } catch (err) {
       console.error("[IcCalculation] save error:", err);
       toast.error("Ошибка при сохранении");
+      throw err;
     } finally {
       setSaving(false);
     }
-  };
+  }, [form, selectedYear, selectedMonth, existingId]);
+
+  const { requestLeave } = useUnsavedGuard({
+    isDirty,
+    onSave: handleSave,
+    saving,
+    enabled: !!canEdit,
+  });
 
   const handleExport = async () => {
     setExporting(true);
@@ -233,10 +257,20 @@ export default function IcCalculation() {
               selectedYear={selectedYear}
               onMonthChange={setSelectedMonth}
               onYearChange={setSelectedYear}
+              confirmChange={requestLeave}
             />
           </GlassCard>
         </div>
       </div>
+
+      {canEdit && (
+        <SaveReminderBanner
+          onSave={handleSave}
+          saving={saving}
+          disabled={loading}
+          isDirty={isDirty}
+        />
+      )}
 
       {!loading && isComplete && (
         <GlassCard className="p-5 border border-primary/30 bg-gradient-to-r from-primary/10 via-primary/5 to-transparent">
