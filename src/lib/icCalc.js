@@ -87,3 +87,15 @@ export function buildIcCalculation({ form, prevForm, energyReport }) {
     totalAmount,
   };
 }
+
+/** Что ещё нужно заполнить для полного расчёта ИЦ */
+export function getIcMissingFields({ form, prevForm, energyReport }) {
+  const missing = [];
+  if (!prevForm) missing.push("показания за прошлый месяц");
+  if (form.ee_reading == null) missing.push("показание ЭЭ");
+  if ((form.water_reading ?? form.water_supply_reading) == null) missing.push("показание воды");
+  if (form.heating_reading == null) missing.push("показание отопления");
+  if (form.residents_count == null) missing.push("число проживающих");
+  if (!energyReport) missing.push("вкладка «Потребление ЭЭ»");
+  return missing;
+}

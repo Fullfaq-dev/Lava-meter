@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { MONTHS } from "@/lib/meterConfig";
 import { supabase } from "@/api/supabaseClient";
-import { buildIcCalculation, getPrevMonth } from "@/lib/icCalc";
+import { buildIcCalculation, getPrevMonth, getIcMissingFields } from "@/lib/icCalc";
 import {
   IC_EE_TRANSFORM_COEF,
   IC_WATER_SUPPLY_TARIFF,
@@ -93,6 +93,13 @@ export default function IcCalculation() {
     () => buildIcCalculation({ form, prevForm, energyReport }),
     [form, prevForm, energyReport]
   );
+
+  const missingFields = useMemo(
+    () => getIcMissingFields({ form, prevForm, energyReport }),
+    [form, prevForm, energyReport]
+  );
+
+  const isComplete = calc.totalAmount != null && missingFields.length === 0;
 
   useEffect(() => {
     setLoading(true);
@@ -238,6 +245,46 @@ export default function IcCalculation() {
           </GlassCard>
         </div>
       </div>
+
+      {!loading && isComplete && (
+        <GlassCard className="p-5 border border-primary/30 bg-gradient-to-r from-primary/10 via-primary/5 to-transparent">
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-5">
+            <div>
+              <p className="text-xs font-semibold text-primary uppercase tracking-wide">
+                Итого ИЦ · {selectedMonth} {selectedYear}
+              </p>
+              <p className="text-3xl md:text-4xl font-bold text-foreground tabular-nums mt-1">
+                {fmtRub(calc.totalAmount)}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1.5">
+                Проживающих: {form.residents_count} чел.
+              </p>
+            </div>
+            <div className="grid grid-cols-3 gap-6 lg:gap-10">
+              <div>
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">Электроэнергия</p>
+                <p className="text-base font-semibold tabular-nums text-foreground">{fmtRub(calc.eeAmount)}</p>
+              </div>
+              <div>
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">Вода</p>
+                <p className="text-base font-semibold tabular-nums text-foreground">{fmtRub(calc.waterTotalAmount)}</p>
+              </div>
+              <div>
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">Отопление</p>
+                <p className="text-base font-semibold tabular-nums text-foreground">{fmtRub(calc.heatingAmount)}</p>
+              </div>
+            </div>
+          </div>
+        </GlassCard>
+      )}
+
+      {!loading && !isComplete && missingFields.length > 0 && (
+        <GlassCard className="px-4 py-3 border border-amber-500/20 bg-amber-500/5">
+          <p className="text-xs text-amber-400/90">
+            Для расчёта итога заполните: {missingFields.join(", ")}
+          </p>
+        </GlassCard>
+      )}
 
       {loading ? (
         <div className="flex items-center justify-center py-20">
