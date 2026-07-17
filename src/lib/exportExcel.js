@@ -1,12 +1,6 @@
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
-import { METERS } from './meterConfig';
-import { calcVedomostTotal, getMeterConsumption } from './consumptionCalc';
-
-/** Счётчики, уже отражённые в именованных строках экспорта */
-const EXPORT_COVERED_METERS = new Set([
-  1, 4, 5, 6, 7, 8, 10, 15, 16, 17, 20, 21, 22,
-]);
+import { getMeterConsumption } from './consumptionCalc';
 
 export const exportEnergyReportToExcel = async ({
   monthName,
@@ -336,25 +330,24 @@ export const exportEnergyReportToExcel = async ({
   const interpolihimCons = getReading(17);
   addRow('«Интерполихим»', interpolihimCons, '-', '-', '-', '-', '-', true);
 
-  // Прочие счётчики из ведомости, не вошедшие в строки выше
-  for (const meter of METERS) {
-    if (EXPORT_COVERED_METERS.has(meter.number)) continue;
-    const cons = getReading(meter.number);
-    if (cons > 0) {
-      addRow(`${meter.name} (${meter.code})`, cons, '-', '-', '-', '-', '-', true);
-    }
-  }
+  const snTotal =
+    (form.sn_zavod_kwh || 0) +
+    (form.sn_energocenter_kwh || 0) +
+    (form.losses_cable_kwh || 0) +
+    (form.losses_transformer_kwh || 0) +
+    (form.boiler_kwh || 0);
+  const totalKwhVazmaEc = (form.vazma_active_kwh || 0) + (form.ec_produced_kwh || 0);
+  // Итог производства = общее поступление − СН и потери (баланс с нижним итогом)
+  const productionTotal = totalKwhVazmaEc - snTotal;
 
-  const vedomostTotal = calcVedomostTotal(readings, lineCalc);
-
-  // Total Row — итог по той же формуле, что и в интерфейсе ведомости
+  // Total Row
   sheet.getRow(currentRow).height = 30;
   sheet.getCell(`A${currentRow}`).value = 'Всего потреблено на\nпроизводстве:';
   sheet.getCell(`A${currentRow}`).font = fontBold;
   sheet.getCell(`A${currentRow}`).alignment = alignCenter;
   sheet.getCell(`A${currentRow}`).border = borderMedium;
 
-  sheet.getCell(`B${currentRow}`).value = vedomostTotal;
+  sheet.getCell(`B${currentRow}`).value = productionTotal;
   sheet.getCell(`B${currentRow}`).font = fontBold;
   sheet.getCell(`B${currentRow}`).alignment = alignCenter;
   sheet.getCell(`B${currentRow}`).border = borderMedium;
@@ -429,35 +422,6 @@ export const exportEnergyReportToExcel = async ({
   sheet.getCell(`B${currentRow}`).font = fontNormal;
   sheet.getCell(`B${currentRow}`).alignment = alignCenter;
   sheet.getCell(`B${currentRow}`).border = borderMedium;
-  currentRow++;
-
-  const snTotal =
-    (form.sn_zavod_kwh || 0) +
-    (form.sn_energocenter_kwh || 0) +
-    (form.losses_cable_kwh || 0) +
-    (form.losses_transformer_kwh || 0) +
-    (form.boiler_kwh || 0);
-
-  // --- Spacer ---
-  currentRow += 2;
-
-  // --- Сверка баланса (как в интерфейсе «Потребление ЭЭ») ---
-  sheet.getRow(currentRow).height = 25;
-  sheet.mergeCells(`A${currentRow}:D${currentRow}`);
-  sheet.getCell(`A${currentRow}`).value = 'Итого (ведомость + СН и потери) —';
-  sheet.getCell(`A${currentRow}`).font = fontBold;
-  sheet.getCell(`A${currentRow}`).alignment = { vertical: 'middle', horizontal: 'right' };
-
-  sheet.mergeCells(`E${currentRow}:F${currentRow}`);
-  sheet.getCell(`E${currentRow}`).value = vedomostTotal + snTotal;
-  sheet.getCell(`E${currentRow}`).font = fontBold;
-  sheet.getCell(`E${currentRow}`).alignment = alignCenter;
-  sheet.getCell(`E${currentRow}`).border = borderMedium;
-  sheet.getCell(`E${currentRow}`).fill = fillGreen;
-
-  sheet.getCell(`G${currentRow}`).value = 'кВт*ч';
-  sheet.getCell(`G${currentRow}`).font = fontBold;
-  sheet.getCell(`G${currentRow}`).alignment = { vertical: 'middle', horizontal: 'left' };
   currentRow++;
 
   // --- Spacer ---
@@ -555,7 +519,7 @@ export const exportEnergyReportToExcel = async ({
   currentRow += 1;
 
   // --- Totals ---
-  const totalKwh = (form.vazma_active_kwh || 0) + (form.ec_produced_kwh || 0);
+  const totalKwh = totalKwhVazmaEc;
   const totalCost = (form.vazma_active_rosseti_rub || 0) +
                     (form.vazma_active_atom_rub || 0) +
                     (form.vazma_reactive_rosseti_rub || 0) +
