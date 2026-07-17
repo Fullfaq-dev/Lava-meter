@@ -61,3 +61,8 @@ export const PRODUCTION_LINES = [
   { key: "granulyaciya2", label: "Грануляция 2" },
   { key: "granulyaciya3", label: "Грануляция 3" },
 ];
+
+/** Ключ колонки брака для линии выпуска */
+export function brakKey(outputKey) {
+  return `${outputKey}_brak`;
+}

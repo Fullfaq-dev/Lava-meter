@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { MONTHS } from "@/lib/meterConfig";
-import { PRODUCTION_LINES } from "@/lib/productionConfig";
+import { PRODUCTION_LINES, brakKey } from "@/lib/productionConfig";
 import { listProduction, upsertProduction } from "@/lib/supabaseApi";
 import GlassCard from "../components/layout/GlassCard";
 import MonthSelector from "../components/table/MonthSelector";
@@ -9,6 +9,29 @@ import { Button } from "@/components/ui/button";
 import { Save, Loader2, Check } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/AuthContext";
+
+function KgInput({ label, value, onChange, disabled, muted }) {
+  return (
+    <div className="space-y-1 flex-1 min-w-0">
+      <label className={`text-[10px] font-medium ${muted ? "text-muted-foreground/70" : "text-muted-foreground"}`}>
+        {label}
+      </label>
+      <div className="relative">
+        <Input
+          type="number"
+          placeholder="0"
+          value={value ?? ""}
+          onChange={(e) => onChange(e.target.value)}
+          className="bg-white/5 border-white/10 pr-10 h-9 text-sm"
+          disabled={disabled}
+        />
+        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+          кг
+        </span>
+      </div>
+    </div>
+  );
+}
 
 export default function ProductionInput() {
   const { user } = useAuth();
@@ -34,6 +57,8 @@ export default function ProductionInput() {
           const vals = {};
           PRODUCTION_LINES.forEach(({ key }) => {
             if (row[key] !== null && row[key] !== undefined) vals[key] = row[key];
+            const bk = brakKey(key);
+            if (row[bk] !== null && row[bk] !== undefined) vals[bk] = row[bk];
           });
           setValues(vals);
         } else {
@@ -44,17 +69,29 @@ export default function ProductionInput() {
       .finally(() => setLoading(false));
   }, [selectedYear, selectedMonth]);
 
+  const setField = (key) => (raw) =>
+    setValues((prev) => ({ ...prev, [key]: raw }));
+
   const handleSave = async () => {
     setSaving(true);
     const payload = { year: selectedYear, month: selectedMonth };
     PRODUCTION_LINES.forEach(({ key }) => {
       const v = values[key];
       payload[key] = v !== undefined && v !== "" ? parseFloat(v) : null;
+      const bk = brakKey(key);
+      const bv = values[bk];
+      payload[bk] = bv !== undefined && bv !== "" ? parseFloat(bv) : null;
     });
-    await upsertProduction(payload);
-    setHasExisting(true);
-    setSaving(false);
-    toast.success(`Выпуск за ${selectedMonth} ${selectedYear} сохранён в Supabase`);
+    try {
+      await upsertProduction(payload);
+      setHasExisting(true);
+      toast.success(`Выпуск за ${selectedMonth} ${selectedYear} сохранён в Supabase`);
+    } catch (err) {
+      console.error("[ProductionInput] save error:", err);
+      toast.error("Ошибка сохранения. Проверьте, что миграция брака выполнена в Supabase.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -65,7 +102,7 @@ export default function ProductionInput() {
             Выпуск продукции
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Объём выпуска по линиям за месяц (кг)
+            Объём выпуска и брак по линиям за месяц (кг)
           </p>
         </div>
         <GlassCard className="p-4 min-w-[280px]">
@@ -84,27 +121,45 @@ export default function ProductionInput() {
         </div>
       ) : (
         <GlassCard className="p-6">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {PRODUCTION_LINES.map(({ key, label }) => (
-              <div key={key} className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">{label}</label>
-                <div className="relative">
-                  <Input
-                    type="number"
-                    placeholder="0"
-                    value={values[key] ?? ""}
-                    onChange={(e) =>
-                      setValues((prev) => ({ ...prev, [key]: e.target.value }))
-                    }
-                    className="bg-white/5 border-white/10 pr-10"
-                    disabled={!canEdit}
-                  />
-                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
-                    кг
-                  </span>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+            {PRODUCTION_LINES.map(({ key, label }) => {
+              const bk = brakKey(key);
+              const total = parseFloat(values[key]) || 0;
+              const defect = parseFloat(values[bk]) || 0;
+              const good = total - defect;
+              return (
+                <div
+                  key={key}
+                  className="rounded-lg border border-white/10 bg-white/[0.02] p-3 space-y-2"
+                >
+                  <p className="text-xs font-semibold text-foreground">{label}</p>
+                  <div className="flex gap-2">
+                    <KgInput
+                      label="Всего (в т.ч. брак)"
+                      value={values[key]}
+                      onChange={setField(key)}
+                      disabled={!canEdit}
+                    />
+                    <KgInput
+                      label="Брак"
+                      value={values[bk]}
+                      onChange={setField(bk)}
+                      disabled={!canEdit}
+                      muted
+                    />
+                  </div>
+                  {(values[key] != null && values[key] !== "") ||
+                  (values[bk] != null && values[bk] !== "") ? (
+                    <p className="text-[10px] text-muted-foreground tabular-nums">
+                      Товар:{" "}
+                      <span className="text-foreground">
+                        {good.toLocaleString("ru-RU", { maximumFractionDigits: 2 })} кг
+                      </span>
+                    </p>
+                  ) : null}
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           <div className="flex items-center justify-between mt-6 pt-4 border-t border-white/10">

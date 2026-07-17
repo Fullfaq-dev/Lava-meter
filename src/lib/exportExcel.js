@@ -297,7 +297,20 @@ export const exportEnergyReportToExcel = async ({
     getMeterConsumption(meterNum, readings, lineCalc);
 
   const getProd = (key) => {
-    return production ? production[key] || 0 : 0;
+    return production ? Number(production[key]) || 0 : 0;
+  };
+
+  /** Нормы: от всего = кВтч/всего; от товара = кВтч/(всего − брак) */
+  const calcNorms = (consumption, totalProd, defectProd) => {
+    const total = Number(totalProd) || 0;
+    const defect = Number(defectProd) || 0;
+    const good = Math.max(0, total - defect);
+    return {
+      defect,
+      good,
+      normTotal: total > 0 ? consumption / total : 0,
+      normGood: good > 0 ? consumption / good : 0,
+    };
   };
 
   // FCL Lines
@@ -305,51 +318,72 @@ export const exportEnergyReportToExcel = async ({
   fclLines.forEach(num => {
     const lineName = `FCL-${num}`;
     const calcRow = lineCalc.find(lc => lc.fcl === lineName);
-    
+    const outputKey = `fcl${num}`;
+
     let consumption = 0;
     let totalProd = 0;
-    let defectProd = 0;
-    let goodProd = 0;
-    let normTotal = 0;
-    let normGood = 0;
 
     if (calcRow) {
       consumption = calcRow.total_consumption || 0;
       totalProd = calcRow.output_kg || 0;
     } else {
       // If not in lineCalc (e.g. FCL-9, FCL-10), try to get from production directly
-      totalProd = getProd(`fcl${num}`);
+      totalProd = getProd(outputKey);
     }
 
-    // Assuming defect is 0 for now as requested, but setting up the structure
-    defectProd = 0;
-    goodProd = totalProd - defectProd;
-    normTotal = totalProd > 0 ? consumption / totalProd : 0;
-    normGood = goodProd > 0 ? consumption / goodProd : 0;
+    const { defect, good, normTotal, normGood } = calcNorms(
+      consumption,
+      totalProd,
+      getProd(`${outputKey}_brak`)
+    );
 
-    addRow(lineName, consumption, totalProd, defectProd, goodProd, normTotal, normGood, true);
+    addRow(lineName, consumption, totalProd, defect, good, normTotal, normGood, true);
   });
 
   // Участок перемотки (Сч.8)
   const peremotkaCons = getReading(7);
   const peremotkaProd = getProd('peremotka');
-  const peremotkaDefect = 0; // Assuming we might have defect, if not 0
-  const peremotkaGood = peremotkaProd - peremotkaDefect;
-  const peremotkaNormTotal = peremotkaProd > 0 ? peremotkaCons / peremotkaProd : 0;
-  const peremotkaNormGood = peremotkaGood > 0 ? peremotkaCons / peremotkaGood : 0;
-  addRow('Участок перемотки', peremotkaCons, peremotkaProd || 0, peremotkaDefect, peremotkaGood || 0, peremotkaNormTotal, peremotkaNormGood, true);
+  const peremotkaNorms = calcNorms(peremotkaCons, peremotkaProd, getProd('peremotka_brak'));
+  addRow(
+    'Участок перемотки',
+    peremotkaCons,
+    peremotkaProd || 0,
+    peremotkaNorms.defect,
+    peremotkaNorms.good,
+    peremotkaNorms.normTotal,
+    peremotkaNorms.normGood,
+    true
+  );
 
   // Гранулятор-1 (Сч.21)
   const gran1Cons = getReading(20);
   const gran1Prod = getProd('granulyaciya1');
-  const gran1NormGood = gran1Prod > 0 ? gran1Cons / gran1Prod : 0;
-  addRow('Гранулятор-1', gran1Cons, gran1Prod || 0, '-', gran1Prod || 0, '-', gran1NormGood, true);
+  const gran1Norms = calcNorms(gran1Cons, gran1Prod, getProd('granulyaciya1_brak'));
+  addRow(
+    'Гранулятор-1',
+    gran1Cons,
+    gran1Prod || 0,
+    gran1Norms.defect,
+    gran1Norms.good,
+    gran1Norms.normTotal,
+    gran1Norms.normGood,
+    true
+  );
 
   // Гранулятор-2 (Сч.22)
   const gran2Cons = getReading(21);
   const gran2Prod = getProd('granulyaciya2');
-  const gran2NormGood = gran2Prod > 0 ? gran2Cons / gran2Prod : 0;
-  addRow('Гранулятор-2', gran2Cons, gran2Prod || 0, '-', gran2Prod || 0, '-', gran2NormGood, true);
+  const gran2Norms = calcNorms(gran2Cons, gran2Prod, getProd('granulyaciya2_brak'));
+  addRow(
+    'Гранулятор-2',
+    gran2Cons,
+    gran2Prod || 0,
+    gran2Norms.defect,
+    gran2Norms.good,
+    gran2Norms.normTotal,
+    gran2Norms.normGood,
+    true
+  );
 
   // Шрёдер (Сч.23)
   const shrederCons = getReading(22);

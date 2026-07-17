@@ -102,6 +102,11 @@ export function buildIcCalculation({ form, prevForm, energyReport }) {
       ? eeAmount + waterTotalAmount + heatingAmount
       : null;
 
+  const perPersonAmount =
+    totalAmount != null && form.residents_count > 0
+      ? totalAmount / form.residents_count
+      : null;
+
   return {
     eeConsumption,
     waterSupplyConsumption,
@@ -117,6 +122,7 @@ export function buildIcCalculation({ form, prevForm, energyReport }) {
     waterTotalAmount,
     heatingAmount,
     totalAmount,
+    perPersonAmount,
   };
 }
 

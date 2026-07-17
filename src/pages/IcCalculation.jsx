@@ -250,6 +250,9 @@ export default function IcCalculation() {
               </p>
               <p className="text-xs text-muted-foreground mt-1.5">
                 Проживающих: {form.residents_count} чел.
+                {calc.perPersonAmount != null && (
+                  <> · на человека: {fmtRub(calc.perPersonAmount)}</>
+                )}
               </p>
             </div>
             <div className="grid grid-cols-3 gap-6 lg:gap-10">
@@ -431,8 +434,14 @@ export default function IcCalculation() {
               <CalcRow label="ИЦ — электроэнергия" value={fmtRub(calc.eeAmount)} unit="" />
               <CalcRow label="ИЦ — вода" value={fmtRub(calc.waterTotalAmount)} unit="" />
               <CalcRow label="ИЦ — отопление" value={fmtRub(calc.heatingAmount)} unit="" />
-              <div className="border-t border-white/10 mt-2 pt-2">
+              <div className="border-t border-white/10 mt-2 pt-2 space-y-0.5">
                 <CalcRow label="Всего ИЦ" value={fmtRub(calc.totalAmount)} unit="" highlight />
+                <CalcRow
+                  label="На человека"
+                  value={fmtRub(calc.perPersonAmount)}
+                  unit=""
+                  highlight
+                />
               </div>
             </div>
 

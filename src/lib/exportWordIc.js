@@ -269,6 +269,15 @@ export async function exportIcReportWord({
     // ——— ИТОГО ———
     p("ИТОГО", { bold: true, blue: true, size: 28, before: 200, after: 60 }),
     p(`${fmtMoney(calc.totalAmount)} руб,`, { bold: true, size: 24 }),
+    ...(calc.perPersonAmount != null
+      ? [
+          p(`На человека: ${fmtMoney(calc.perPersonAmount)} руб`, {
+            bold: true,
+            size: 22,
+            before: 80,
+          }),
+        ]
+      : []),
   ];
 
   const doc = new Document({
