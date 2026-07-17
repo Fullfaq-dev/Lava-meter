@@ -11,6 +11,7 @@ import DataInput from './pages/DataInput';
 import Analytics from './pages/Analytics';
 import ProductionInput from './pages/ProductionInput';
 import EnergyReportInput from './pages/EnergyReportInput';
+import IcCalculation from './pages/IcCalculation';
 import Login from './pages/Login';
 import { Navigate, useLocation } from 'react-router-dom';
 
@@ -23,13 +24,18 @@ const ProtectedRoute = ({ children, requiredAccess }) => {
   }
 
   if (requiredAccess && user && !user[requiredAccess]) {
+    const icFallback =
+      requiredAccess === "access_ic_calculation" && user.access_energy_report;
+    if (!icFallback) {
     // Find the first available page for the user
     if (user.access_vedomost) return <Navigate to="/" replace />;
     if (user.access_input) return <Navigate to="/input" replace />;
     if (user.access_analytics) return <Navigate to="/analytics" replace />;
     if (user.access_production) return <Navigate to="/production" replace />;
     if (user.access_energy_report) return <Navigate to="/energy-report" replace />;
+    if (user.access_ic_calculation) return <Navigate to="/ic-calculation" replace />;
     return <div>У вас нет доступа ни к одной странице.</div>;
+    }
   }
 
   return children;
@@ -55,6 +61,7 @@ const AuthenticatedApp = () => {
         <Route path="/analytics" element={<ProtectedRoute requiredAccess="access_analytics"><Analytics /></ProtectedRoute>} />
         <Route path="/production" element={<ProtectedRoute requiredAccess="access_production"><ProductionInput /></ProtectedRoute>} />
         <Route path="/energy-report" element={<ProtectedRoute requiredAccess="access_energy_report"><EnergyReportInput /></ProtectedRoute>} />
+        <Route path="/ic-calculation" element={<ProtectedRoute requiredAccess="access_ic_calculation"><IcCalculation /></ProtectedRoute>} />
       </Route>
       <Route path="*" element={<PageNotFound />} />
     </Routes>

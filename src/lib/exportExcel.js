@@ -2,6 +2,39 @@ import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import { getMeterConsumption } from './consumptionCalc';
 
+/** Разницу баланса распределяем только в СН завода и энергоцентра (для Excel). */
+function calcAdjustedSnForExport(form, productionTotal, totalKwhVazmaEc) {
+  const snZavodForm = form.sn_zavod_kwh ?? 0;
+  const snEcForm = form.sn_energocenter_kwh ?? 0;
+  const lossesFixed =
+    (form.losses_cable_kwh ?? 0) +
+    (form.losses_transformer_kwh ?? 0) +
+    (form.boiler_kwh ?? 0);
+
+  // production + vazma + СН + потери = vazma + ec
+  const targetSnVariable =
+    totalKwhVazmaEc -
+    (form.vazma_active_kwh ?? 0) -
+    productionTotal -
+    lossesFixed;
+
+  const snVariableForm = snZavodForm + snEcForm;
+
+  if (snVariableForm <= 0) {
+    const half = targetSnVariable / 2;
+    return {
+      snZavod: Math.round(half * 10) / 10,
+      snEc: Math.round((targetSnVariable - half) * 10) / 10,
+    };
+  }
+
+  const snZavod = Math.round((snZavodForm / snVariableForm) * targetSnVariable * 10) / 10;
+  return {
+    snZavod,
+    snEc: Math.round((targetSnVariable - snZavod) * 10) / 10,
+  };
+}
+
 export const exportEnergyReportToExcel = async ({
   monthName,
   year,
@@ -330,24 +363,17 @@ export const exportEnergyReportToExcel = async ({
   const interpolihimCons = getReading(17);
   addRow('«Интерполихим»', interpolihimCons, '-', '-', '-', '-', '-', true);
 
-  const snTotal =
-    (form.sn_zavod_kwh || 0) +
-    (form.sn_energocenter_kwh || 0) +
-    (form.losses_cable_kwh || 0) +
-    (form.losses_transformer_kwh || 0) +
-    (form.boiler_kwh || 0);
   const totalKwhVazmaEc = (form.vazma_active_kwh || 0) + (form.ec_produced_kwh || 0);
-  // Итог производства = общее поступление − СН и потери (баланс с нижним итогом)
-  const productionTotal = totalKwhVazmaEc - snTotal;
+  const { snZavod, snEc } = calcAdjustedSnForExport(form, totalConsumption, totalKwhVazmaEc);
 
-  // Total Row
+  // Total Row — сумма строк оборудования выше
   sheet.getRow(currentRow).height = 30;
   sheet.getCell(`A${currentRow}`).value = 'Всего потреблено на\nпроизводстве:';
   sheet.getCell(`A${currentRow}`).font = fontBold;
   sheet.getCell(`A${currentRow}`).alignment = alignCenter;
   sheet.getCell(`A${currentRow}`).border = borderMedium;
 
-  sheet.getCell(`B${currentRow}`).value = productionTotal;
+  sheet.getCell(`B${currentRow}`).value = totalConsumption;
   sheet.getCell(`B${currentRow}`).font = fontBold;
   sheet.getCell(`B${currentRow}`).alignment = alignCenter;
   sheet.getCell(`B${currentRow}`).border = borderMedium;
@@ -370,7 +396,7 @@ export const exportEnergyReportToExcel = async ({
   sheet.getCell(`A${currentRow}`).alignment = alignCenter;
   sheet.getCell(`A${currentRow}`).border = borderMedium;
 
-  sheet.getCell(`B${currentRow}`).value = form.sn_zavod_kwh || 0;
+  sheet.getCell(`B${currentRow}`).value = snZavod;
   sheet.getCell(`B${currentRow}`).font = fontNormal;
   sheet.getCell(`B${currentRow}`).alignment = alignCenter;
   sheet.getCell(`B${currentRow}`).border = borderMedium;
@@ -382,7 +408,7 @@ export const exportEnergyReportToExcel = async ({
   sheet.getCell(`A${currentRow}`).alignment = alignCenter;
   sheet.getCell(`A${currentRow}`).border = borderMedium;
 
-  sheet.getCell(`B${currentRow}`).value = form.sn_energocenter_kwh || 0;
+  sheet.getCell(`B${currentRow}`).value = snEc;
   sheet.getCell(`B${currentRow}`).font = fontNormal;
   sheet.getCell(`B${currentRow}`).alignment = alignCenter;
   sheet.getCell(`B${currentRow}`).border = borderMedium;

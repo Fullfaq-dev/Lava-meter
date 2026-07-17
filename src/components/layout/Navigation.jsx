@@ -1,6 +1,6 @@
 import React from "react";
 import { Link, useLocation } from "react-router-dom";
-import { TableProperties, PenLine, BarChart3, Zap, PackageOpen, FileText, LogOut } from "lucide-react";
+import { TableProperties, PenLine, BarChart3, Zap, PackageOpen, FileText, LogOut, Calculator } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,7 @@ const navItems = [
   { path: "/input", label: "Ввод данных", icon: PenLine, accessKey: "access_input" },
   { path: "/production", label: "Выпуск", icon: PackageOpen, accessKey: "access_production" },
   { path: "/energy-report", label: "Потребление ЭЭ", icon: FileText, accessKey: "access_energy_report" },
+  { path: "/ic-calculation", label: "Расчёт ИЦ", icon: Calculator, accessKey: "access_ic_calculation" },
   { path: "/analytics", label: "Аналитика", icon: BarChart3, accessKey: "access_analytics" },
 ];
 
@@ -17,7 +18,12 @@ export default function Navigation() {
   const location = useLocation();
   const { user, logout } = useAuth();
 
-  const filteredNavItems = navItems.filter(item => user && user[item.accessKey]);
+  const filteredNavItems = navItems.filter((item) => {
+    if (!user) return false;
+    if (user[item.accessKey]) return true;
+    if (item.accessKey === "access_ic_calculation" && user.access_energy_report) return true;
+    return false;
+  });
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 md:fixed md:top-0 md:bottom-auto">

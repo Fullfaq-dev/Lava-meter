@@ -9,10 +9,11 @@ CREATE TABLE IF NOT EXISTS LAVA_USERS (
     access_analytics BOOLEAN DEFAULT false,
     access_production BOOLEAN DEFAULT false,
     access_energy_report BOOLEAN DEFAULT false,
+    access_ic_calculation BOOLEAN DEFAULT false,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- Insert a default admin user
-INSERT INTO LAVA_USERS (username, password, can_read, can_edit, access_vedomost, access_input, access_analytics, access_production, access_energy_report)
-VALUES ('admin', 'admin', true, true, true, true, true, true, true)
+INSERT INTO LAVA_USERS (username, password, can_read, can_edit, access_vedomost, access_input, access_analytics, access_production, access_energy_report, access_ic_calculation)
+VALUES ('admin', 'admin', true, true, true, true, true, true, true, true)
 ON CONFLICT (username) DO NOTHING;
