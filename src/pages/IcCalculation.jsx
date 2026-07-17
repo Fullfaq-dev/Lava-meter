@@ -1,11 +1,9 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { MONTHS } from "@/lib/meterConfig";
 import { supabase } from "@/api/supabaseClient";
-import { buildIcCalculation, getPrevMonth, getIcMissingFields } from "@/lib/icCalc";
+import { buildIcCalculation, getPrevMonth, getIcMissingFields, buildIcFormFromDb } from "@/lib/icCalc";
 import {
   IC_EE_TRANSFORM_COEF,
-  IC_WATER_SUPPLY_TARIFF,
-  IC_WATER_DRAINAGE_TARIFF,
   IC_HEATING_TARIFF_PER_GCAL,
 } from "@/lib/icConfig";
 import { exportIcReportWord } from "@/lib/exportWordIc";
@@ -134,16 +132,10 @@ export default function IcCalculation() {
 
         if (icRes.data) {
           setExistingId(icRes.data.id);
-          const water = icRes.data.water_supply_reading ?? icRes.data.water_drainage_reading;
-          setForm({
-            ee_reading: icRes.data.ee_reading,
-            water_reading: water,
-            heating_reading: icRes.data.heating_reading,
-            residents_count: icRes.data.residents_count,
-          });
+          setForm(buildIcFormFromDb(icRes.data));
         } else {
           setExistingId(null);
-          setForm({});
+          setForm(buildIcFormFromDb(null));
         }
 
         setPrevForm(prevRes.data || null);
@@ -360,19 +352,42 @@ export default function IcCalculation() {
               </div>
               <div>
                 <p className="text-sm font-semibold text-foreground">Вода</p>
-                <p className="text-[11px] text-muted-foreground">Один счётчик, м³ (подача и отвод)</p>
+                <p className="text-[11px] text-muted-foreground">Один счётчик, м³ · тарифы можно менять</p>
               </div>
             </div>
 
-            <FieldRow label={`Показание за ${prevLabel}`} value={prevForm?.water_supply_reading ?? prevForm?.water_drainage_reading} onChange={() => {}} unit="м³" disabled />
-            <FieldRow label="Показание за текущий месяц" value={form.water_reading} onChange={set("water_reading")} unit="м³" disabled={!canEdit} />
+            <FieldRow
+              label={`Показание за ${prevLabel}`}
+              value={prevForm?.water_supply_reading ?? prevForm?.water_drainage_reading}
+              onChange={() => {}}
+              unit="м³"
+              disabled
+            />
+            <FieldRow
+              label="Показание за текущий месяц"
+              value={form.water_reading}
+              onChange={set("water_reading")}
+              unit="м³"
+              disabled={!canEdit}
+            />
+            <FieldRow
+              label="Тариф водоснабжения"
+              value={form.water_supply_tariff}
+              onChange={set("water_supply_tariff")}
+              unit="₽/м³"
+              disabled={!canEdit}
+            />
+            <FieldRow
+              label="Тариф водоотведения"
+              value={form.water_drainage_tariff}
+              onChange={set("water_drainage_tariff")}
+              unit="₽/м³"
+              disabled={!canEdit}
+            />
 
             <div className="mt-3 rounded-lg bg-chart-3/5 border border-chart-3/20 px-3 py-2 space-y-0.5">
               <CalcRow label="Объём за месяц" value={fmt(calc.waterSupplyConsumption, 0)} unit="м³" />
-              <CalcRow label="Тариф водоснабжения" value={fmt(IC_WATER_SUPPLY_TARIFF, 2)} unit="₽/м³" />
               <CalcRow label="Сумма водоснабжения" value={fmtRub(calc.waterSupplyAmount)} unit="" />
-              <CalcRow label="Объём водоотведения" value={fmt(calc.waterDrainageConsumption, 0)} unit="м³" />
-              <CalcRow label="Тариф водоотведения" value={fmt(IC_WATER_DRAINAGE_TARIFF, 2)} unit="₽/м³" />
               <CalcRow label="Сумма водоотведения" value={fmtRub(calc.waterDrainageAmount)} unit="" />
               <CalcRow label="Итого по воде" value={fmtRub(calc.waterTotalAmount)} unit="" highlight />
             </div>

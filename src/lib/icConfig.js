@@ -2,6 +2,7 @@
 
 export const IC_EE_TRANSFORM_COEF = 50;
 
+/** Дефолтные тарифы воды (редактируются в UI) */
 export const IC_WATER_SUPPLY_TARIFF = 51.26;
 export const IC_WATER_DRAINAGE_TARIFF = 36.67;
 

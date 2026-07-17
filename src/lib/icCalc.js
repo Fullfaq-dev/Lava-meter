@@ -19,6 +19,38 @@ export function calcMonthDiff(current, previous) {
   return diff >= 0 ? diff : null;
 }
 
+function prevWaterReading(prevForm) {
+  if (!prevForm) return null;
+  return prevForm.water_reading ?? prevForm.water_supply_reading ?? prevForm.water_drainage_reading ?? null;
+}
+
+export function defaultWaterTariffs() {
+  return {
+    water_supply_tariff: IC_WATER_SUPPLY_TARIFF,
+    water_drainage_tariff: IC_WATER_DRAINAGE_TARIFF,
+  };
+}
+
+export function buildIcFormFromDb(icData) {
+  const tariffs = defaultWaterTariffs();
+  if (icData) {
+    return {
+      ee_reading: icData.ee_reading,
+      water_reading: icData.water_supply_reading ?? icData.water_drainage_reading ?? null,
+      heating_reading: icData.heating_reading,
+      residents_count: icData.residents_count,
+      ...tariffs,
+    };
+  }
+  return {
+    ee_reading: null,
+    water_reading: null,
+    heating_reading: null,
+    residents_count: null,
+    ...tariffs,
+  };
+}
+
 /** Фактическая стоимость 1 кВт·ч из вкладки «Потребление ЭЭ» */
 export function calcEeTariffPerKwh(energyReport) {
   if (!energyReport) return null;
@@ -36,12 +68,14 @@ export function buildIcCalculation({ form, prevForm, energyReport }) {
   const eeConsumption = calcMonthDiff(form.ee_reading, prevForm?.ee_reading);
 
   const waterReading = form.water_reading ?? form.water_supply_reading;
-  const prevWaterReading = prevForm?.water_reading ?? prevForm?.water_supply_reading;
-  const waterConsumption = calcMonthDiff(waterReading, prevWaterReading);
+  const waterConsumption = calcMonthDiff(waterReading, prevWaterReading(prevForm));
   const waterSupplyConsumption = waterConsumption;
   const waterDrainageConsumption = waterConsumption;
 
   const heatingConsumption = calcMonthDiff(form.heating_reading, prevForm?.heating_reading);
+
+  const waterSupplyTariff = form.water_supply_tariff ?? IC_WATER_SUPPLY_TARIFF;
+  const waterDrainageTariff = form.water_drainage_tariff ?? IC_WATER_DRAINAGE_TARIFF;
 
   const eeTariff = calcEeTariffPerKwh(energyReport);
   const eeAmount =
@@ -50,13 +84,9 @@ export function buildIcCalculation({ form, prevForm, energyReport }) {
       : null;
 
   const waterSupplyAmount =
-    waterSupplyConsumption != null
-      ? waterSupplyConsumption * IC_WATER_SUPPLY_TARIFF
-      : null;
+    waterSupplyConsumption != null ? waterSupplyConsumption * waterSupplyTariff : null;
   const waterDrainageAmount =
-    waterDrainageConsumption != null
-      ? waterDrainageConsumption * IC_WATER_DRAINAGE_TARIFF
-      : null;
+    waterDrainageConsumption != null ? waterDrainageConsumption * waterDrainageTariff : null;
   const waterTotalAmount =
     waterSupplyAmount != null && waterDrainageAmount != null
       ? waterSupplyAmount + waterDrainageAmount
@@ -79,6 +109,8 @@ export function buildIcCalculation({ form, prevForm, energyReport }) {
     heatingConsumption,
     eeTariff,
     eeTransformCoef: IC_EE_TRANSFORM_COEF,
+    waterSupplyTariff,
+    waterDrainageTariff,
     eeAmount,
     waterSupplyAmount,
     waterDrainageAmount,

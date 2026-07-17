@@ -9,18 +9,34 @@ import {
   WidthType,
   AlignmentType,
   BorderStyle,
+  VerticalAlign,
 } from "docx";
 import { saveAs } from "file-saver";
-import { MONTHS_GENITIVE } from "./meterConfig";
+import { MONTHS, MONTHS_GENITIVE } from "./meterConfig";
 import { getPrevMonth } from "./icCalc";
 import {
   IC_EE_TRANSFORM_COEF,
-  IC_WATER_SUPPLY_TARIFF,
-  IC_WATER_DRAINAGE_TARIFF,
   IC_HEATING_TARIFF_PER_GCAL,
 } from "./icConfig";
 
-const fmt = (v, digits = 2) =>
+const BLUE = "2E75B6";
+const FONT = "Times New Roman";
+
+/** Ширины колонок (DXA), суммарно ~ A4 с полями */
+const COL_W = [1700, 1700, 3200, 1700, 1400];
+const TABLE_W = COL_W.reduce((a, b) => a + b, 0);
+
+const border = {
+  top: { style: BorderStyle.SINGLE, size: 8, color: "000000" },
+  bottom: { style: BorderStyle.SINGLE, size: 8, color: "000000" },
+  left: { style: BorderStyle.SINGLE, size: 8, color: "000000" },
+  right: { style: BorderStyle.SINGLE, size: 8, color: "000000" },
+};
+
+const fmtInt = (v) =>
+  v != null && !isNaN(v) ? Number(v).toLocaleString("ru-RU", { maximumFractionDigits: 0 }) : "—";
+
+const fmtNum = (v, digits = 2) =>
   v != null && !isNaN(v)
     ? Number(v).toLocaleString("ru-RU", {
         minimumFractionDigits: digits,
@@ -28,87 +44,95 @@ const fmt = (v, digits = 2) =>
       })
     : "—";
 
-const fmtMoney = (v) =>
-  v != null && !isNaN(v)
-    ? Number(v).toLocaleString("ru-RU", {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      })
-    : "—";
-
-const border = {
-  top: { style: BorderStyle.SINGLE, size: 1 },
-  bottom: { style: BorderStyle.SINGLE, size: 1 },
-  left: { style: BorderStyle.SINGLE, size: 1 },
-  right: { style: BorderStyle.SINGLE, size: 1 },
+/** Без пробелов тысяч — как в промежуточных строках референса */
+const fmtPlain = (v, digits = 2) => {
+  if (v == null || isNaN(v)) return "—";
+  return Number(v).toFixed(digits).replace(".", ",");
 };
 
-function cell(text, opts = {}) {
-  const { bold = false, align = AlignmentType.LEFT, colspan = 1 } = opts;
-  return new TableCell({
-    borders: border,
-    columnSpan: colspan,
+const fmtMoney = (v) => (v != null && !isNaN(v) ? fmtNum(v, 2) : "—");
+
+function monthGenitive(monthName) {
+  const idx = MONTHS.indexOf(monthName);
+  return idx >= 0 ? MONTHS_GENITIVE[idx] : monthName;
+}
+
+function monthLower(monthName) {
+  return String(monthName || "").toLowerCase();
+}
+
+function p(text, opts = {}) {
+  const {
+    bold = false,
+    blue = false,
+    center = false,
+    size = 22,
+    after = 0,
+    before = 0,
+  } = opts;
+  return new Paragraph({
+    alignment: center ? AlignmentType.CENTER : AlignmentType.LEFT,
+    spacing: { before, after },
     children: [
-      new Paragraph({
-        alignment: align,
-        children: [new TextRun({ text: String(text), bold })],
+      new TextRun({
+        text: String(text),
+        bold,
+        size,
+        font: FONT,
+        color: blue ? BLUE : "000000",
       }),
     ],
   });
 }
 
-function headerRow(cells) {
-  return new TableRow({
-    children: cells.map((t) => cell(t, { bold: true, align: AlignmentType.CENTER })),
+function cell(text, opts = {}) {
+  const {
+    bold = false,
+    center = true,
+    width,
+    header = false,
+  } = opts;
+  return new TableCell({
+    borders: border,
+    width: { size: width, type: WidthType.DXA },
+    verticalAlign: VerticalAlign.CENTER,
+    children: [
+      new Paragraph({
+        alignment: center ? AlignmentType.CENTER : AlignmentType.LEFT,
+        children: [
+          new TextRun({
+            text: String(text ?? ""),
+            bold: bold || header,
+            size: 18,
+            font: FONT,
+          }),
+        ],
+      }),
+    ],
   });
 }
 
-function dataRow(cells) {
-  return new TableRow({
-    children: cells.map((t, i) =>
-      cell(t, { align: i === 0 ? AlignmentType.LEFT : AlignmentType.CENTER })
-    ),
-  });
-}
-
-function sectionTable(title, headerCells, dataCells, calcLines, totalLabel, totalValue) {
-  const rows = [
-    new TableRow({
-      children: [cell(title, { bold: true, colspan: headerCells.length })],
-    }),
-    headerRow(headerCells),
-    dataRow(dataCells),
-  ];
-
-  calcLines.forEach((line) => {
-    rows.push(
-      new TableRow({
-        children: [cell(line, { colspan: headerCells.length })],
-      })
-    );
-  });
-
-  rows.push(
-    new TableRow({
-      children: [
-        cell(totalLabel, { bold: true, colspan: headerCells.length - 1 }),
-        cell(totalValue, { bold: true, align: AlignmentType.CENTER }),
-      ],
-    })
-  );
-
+function makeTable(headers, values) {
   return new Table({
-    width: { size: 100, type: WidthType.PERCENTAGE },
-    rows,
+    width: { size: TABLE_W, type: WidthType.DXA },
+    columnWidths: COL_W,
+    rows: [
+      new TableRow({
+        children: headers.map((t, i) =>
+          cell(t, { header: true, width: COL_W[i] })
+        ),
+      }),
+      new TableRow({
+        children: values.map((t, i) =>
+          cell(t, { bold: true, width: COL_W[i] })
+        ),
+      }),
+    ],
   });
 }
 
-function monthGenitive(monthName) {
-  const idx = [
-    "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
-    "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь",
-  ].indexOf(monthName);
-  return idx >= 0 ? MONTHS_GENITIVE[idx] : monthName;
+function sectionTitle(text) {
+  return p(text, { bold: true, blue: true, size: 24, before: 280, after: 80 });
 }
 
 export async function exportIcReportWord({
@@ -119,129 +143,148 @@ export async function exportIcReportWord({
   calc,
 }) {
   const prev = getPrevMonth(year, monthName);
-  const prevMonthGen = prev ? monthGenitive(prev.month) : "—";
-  const currMonthGen = monthGenitive(monthName);
+  const prevGen = prev ? monthGenitive(prev.month) : "—";
+  const currGen = monthGenitive(monthName);
+  const monthTariff = monthLower(monthName);
 
-  const eeKwh =
-    calc.eeConsumption != null ? calc.eeConsumption * IC_EE_TRANSFORM_COEF : null;
+  const eeCons = calc.eeConsumption;
+  const eeKwh = eeCons != null ? eeCons * IC_EE_TRANSFORM_COEF : null;
+  const eeTariff = calc.eeTariff;
 
+  const waterVol = calc.waterSupplyConsumption;
   const waterReading = form.water_reading ?? form.water_supply_reading;
-  const prevWater = prevForm?.water_reading ?? prevForm?.water_supply_reading;
+  const prevWater =
+    prevForm?.water_reading ?? prevForm?.water_supply_reading ?? prevForm?.water_drainage_reading;
+  const waterSupplyTariff = calc.waterSupplyTariff;
+  const waterDrainageTariff = calc.waterDrainageTariff;
+
+  const children = [
+    p("Отчет по коммунальным услугам", { bold: true, blue: true, center: true, size: 28, after: 40 }),
+    p("Исправительный центр", { bold: true, blue: true, center: true, size: 26, after: 40 }),
+    p(`${monthName} ${year} г.`, { blue: true, center: true, size: 24, after: 200 }),
+    p(`Количество проживающих: ${form.residents_count ?? "—"} человек`, {
+      bold: true,
+      size: 22,
+      after: 200,
+    }),
+
+    // ——— Электроэнергия ———
+    sectionTitle("Электроэнергия"),
+    makeTable(
+      [
+        `Показания счетчика на конец ${prevGen}`,
+        `Показания счетчика на конец ${currGen}`,
+        "Разница",
+        "Тариф",
+        "Сумма",
+      ],
+      [
+        fmtInt(prevForm?.ee_reading),
+        fmtInt(form.ee_reading),
+        eeCons != null && eeKwh != null
+          ? `${fmtInt(eeCons)} × ${IC_EE_TRANSFORM_COEF} (коэффициент трансформации) = ${fmtInt(eeKwh)} кВт·ч`
+          : "—",
+        eeTariff != null
+          ? `${fmtNum(eeTariff, 2)} (тариф за ${monthTariff})`
+          : "—",
+        fmtMoney(calc.eeAmount),
+      ]
+    ),
+    p(
+      `Расчет: (${fmtInt(form.ee_reading)}-${fmtInt(prevForm?.ee_reading)})=${fmtInt(eeCons)};`,
+      { size: 20, before: 80 }
+    ),
+    p(
+      `${fmtInt(eeCons)}×${IC_EE_TRANSFORM_COEF} (коэффициент трансформации) = ${fmtInt(eeKwh)} кВт·ч;`,
+      { size: 20 }
+    ),
+    p(
+      `${fmtInt(eeKwh)}×${fmtNum(eeTariff, 2)} (тариф за ${monthTariff}) = ${fmtMoney(calc.eeAmount)} руб`,
+      { bold: true, size: 20, after: 120 }
+    ),
+
+    // ——— Вода ———
+    sectionTitle("Вода"),
+    makeTable(
+      [
+        `Показания счетчика на конец ${prevGen}`,
+        `Показания счетчика на конец ${currGen}`,
+        "Разница",
+        "Тариф",
+        "Сумма",
+      ],
+      [
+        fmtInt(prevWater),
+        fmtInt(waterReading),
+        waterVol != null ? `${fmtInt(waterVol)} м³` : "—",
+        `${fmtNum(waterSupplyTariff, 2)} / ${fmtNum(waterDrainageTariff, 2)}`,
+        fmtMoney(calc.waterTotalAmount),
+      ]
+    ),
+    p(
+      `Расчет: (${fmtInt(waterReading)}-${fmtInt(prevWater)})=${fmtInt(waterVol)} м³`,
+      { size: 20, before: 80 }
+    ),
+    p(
+      `${fmtInt(waterVol)} х ${fmtNum(waterSupplyTariff, 2)} = ${fmtPlain(calc.waterSupplyAmount)} водоснабжение`,
+      { size: 20 }
+    ),
+    p(
+      `${fmtInt(calc.waterDrainageConsumption)} х ${fmtNum(waterDrainageTariff, 2)} = ${fmtPlain(calc.waterDrainageAmount)} водоотведение`,
+      { size: 20 }
+    ),
+    p(`итого ${fmtMoney(calc.waterTotalAmount)} руб`, {
+      bold: true,
+      size: 20,
+      after: 120,
+    }),
+
+    // ——— Отопление ———
+    sectionTitle("Отопление"),
+    makeTable(
+      [
+        `Показания счетчика на конец ${prevGen}`,
+        `Показания счетчика на конец ${currGen}`,
+        "Разница",
+        "Тариф",
+        "Сумма",
+      ],
+      [
+        fmtInt(prevForm?.heating_reading),
+        fmtInt(form.heating_reading),
+        fmtInt(calc.heatingConsumption),
+        `${IC_HEATING_TARIFF_PER_GCAL} (стоимость 1 Гк)`,
+        fmtMoney(calc.heatingAmount),
+      ]
+    ),
+    p(
+      `Расчет: (${fmtInt(form.heating_reading)}-${fmtInt(prevForm?.heating_reading)})=${fmtInt(calc.heatingConsumption)};`,
+      { size: 20, before: 80 }
+    ),
+    p(
+      `${fmtInt(calc.heatingConsumption)}×${IC_HEATING_TARIFF_PER_GCAL}(стоимость 1 Гк) = ${fmtMoney(calc.heatingAmount)} руб,`,
+      { size: 20, after: 200 }
+    ),
+
+    // ——— ИТОГО ———
+    p("ИТОГО", { bold: true, blue: true, size: 28, before: 200, after: 60 }),
+    p(`${fmtMoney(calc.totalAmount)} руб,`, { bold: true, size: 24 }),
+  ];
 
   const doc = new Document({
     sections: [
       {
-        children: [
-          new Paragraph({
-            alignment: AlignmentType.CENTER,
-            children: [new TextRun({ text: "Отчет по коммунальным услугам", bold: true, size: 28 })],
-          }),
-          new Paragraph({
-            alignment: AlignmentType.CENTER,
-            children: [new TextRun({ text: "Исправительный центр", size: 24 })],
-          }),
-          new Paragraph({
-            alignment: AlignmentType.CENTER,
-            spacing: { after: 200 },
-            children: [new TextRun({ text: `${monthName} ${year} г.`, size: 24 })],
-          }),
-          new Paragraph({
-            spacing: { after: 300 },
-            children: [
-              new TextRun({
-                text: `Количество проживающих: ${form.residents_count ?? "—"} человек`,
-              }),
-            ],
-          }),
-
-          sectionTable(
-            "Электроэнергия",
-            [
-              `Показания счетчика на конец ${prevMonthGen}`,
-              `Показания счетчика на конец ${currMonthGen}`,
-              "Разница",
-              "Тариф",
-              "Сумма",
-            ],
-            [
-              fmt(prevForm?.ee_reading, 0),
-              fmt(form.ee_reading, 0),
-              fmt(calc.eeConsumption, 0),
-              calc.eeTariff != null
-                ? `${fmt(calc.eeTariff, 2)} (тариф за ${monthName.toLowerCase()})`
-                : "—",
-              fmtMoney(calc.eeAmount),
-            ],
-            [
-              `Расчет: (${fmt(form.ee_reading, 0)}-${fmt(prevForm?.ee_reading, 0)})=${fmt(calc.eeConsumption, 0)}; ${fmt(calc.eeConsumption, 0)}×${IC_EE_TRANSFORM_COEF} (коэффициент трансформации) = ${fmt(eeKwh, 0)} кВт·ч; ${fmt(eeKwh, 0)}×${fmt(calc.eeTariff, 2)} (тариф за ${monthName.toLowerCase()}) = ${fmtMoney(calc.eeAmount)} руб`,
-            ],
-            "",
-            ""
-          ),
-
-          new Paragraph({ spacing: { before: 300 } }),
-
-          sectionTable(
-            "Вода",
-            [
-              `Показания счетчика на конец ${prevMonthGen}`,
-              `Показания счетчика на конец ${currMonthGen}`,
-              "Разница",
-              "Тариф",
-              "Сумма",
-            ],
-            [
-              fmt(prevWater, 0),
-              fmt(waterReading, 0),
-              calc.waterSupplyConsumption != null
-                ? `${fmt(calc.waterSupplyConsumption, 0)} м³`
-                : "—",
-              `${IC_WATER_SUPPLY_TARIFF} / ${IC_WATER_DRAINAGE_TARIFF}`,
-              fmtMoney(calc.waterTotalAmount),
-            ],
-            [
-              `Расчет: (${fmt(waterReading, 0)}-${fmt(prevWater, 0)})=${fmt(calc.waterSupplyConsumption, 0)} м³`,
-              `${fmt(calc.waterSupplyConsumption, 0)} х ${IC_WATER_SUPPLY_TARIFF} = ${fmtMoney(calc.waterSupplyAmount)} водоснабжение`,
-              `${fmt(calc.waterDrainageConsumption, 0)} х ${IC_WATER_DRAINAGE_TARIFF} = ${fmtMoney(calc.waterDrainageAmount)} водоотведение`,
-              `итого ${fmtMoney(calc.waterTotalAmount)} руб`,
-            ],
-            "",
-            ""
-          ),
-
-          new Paragraph({ spacing: { before: 300 } }),
-
-          sectionTable(
-            "Отопление",
-            [
-              `Показания счетчика на конец ${prevMonthGen}`,
-              `Показания счетчика на конец ${currMonthGen}`,
-              "Разница",
-              "Тариф",
-              "Сумма",
-            ],
-            [
-              fmt(prevForm?.heating_reading, 0),
-              fmt(form.heating_reading, 0),
-              fmt(calc.heatingConsumption, 0),
-              `${IC_HEATING_TARIFF_PER_GCAL} (стоимость 1 Гк)`,
-              fmtMoney(calc.heatingAmount),
-            ],
-            [
-              `Расчет: (${fmt(form.heating_reading, 0)}-${fmt(prevForm?.heating_reading, 0)})=${fmt(calc.heatingConsumption, 0)}; ${fmt(calc.heatingConsumption, 0)}×${IC_HEATING_TARIFF_PER_GCAL} (стоимость 1 Гк) = ${fmtMoney(calc.heatingAmount)} руб`,
-            ],
-            "",
-            ""
-          ),
-
-          new Paragraph({ spacing: { before: 400 } }),
-          new Paragraph({
-            children: [
-              new TextRun({ text: "ИТОГО ", bold: true, size: 24 }),
-              new TextRun({ text: `${fmtMoney(calc.totalAmount)} руб`, bold: true, size: 24 }),
-            ],
-          }),
-        ],
+        properties: {
+          page: {
+            margin: {
+              top: 720,
+              right: 720,
+              bottom: 720,
+              left: 720,
+            },
+          },
+        },
+        children,
       },
     ],
   });
