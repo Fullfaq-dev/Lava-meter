@@ -10,6 +10,30 @@
 
 import { FRICOOLER_GROUPS } from "./productionConfig";
 
+/** Счётчики фрикуллеров — их расход уже распределён по FCL-линиям */
+export const FRICOOLER_METER_NUMS = new Set([2, 3, 12]);
+
+/** Расход одного счётчика: FCL-линия → total_consumption, иначе → consumption */
+export function getMeterConsumption(meterNum, readings, lineCalcRows) {
+  if (FRICOOLER_METER_NUMS.has(meterNum)) {
+    const r = readings.find((x) => x.meter_number === meterNum);
+    return r?.consumption || 0;
+  }
+  const fclRow = (lineCalcRows || []).find((lc) => lc.meter_number === meterNum);
+  if (fclRow) return fclRow.total_consumption;
+  const r = readings.find((x) => x.meter_number === meterNum);
+  return r?.consumption || 0;
+}
+
+/** Общий расход по ведомости (как в MeterSummaryCards и EnergyReportInput) */
+export function calcVedomostTotal(readings, lineCalcRows) {
+  return readings.reduce((sum, r) => {
+    if (FRICOOLER_METER_NUMS.has(r.meter_number)) return sum;
+    const fclRow = (lineCalcRows || []).find((lc) => lc.meter_number === r.meter_number);
+    return sum + (fclRow ? fclRow.total_consumption : (r.consumption || 0));
+  }, 0);
+}
+
 /**
  * @param {Array} readings - все показания за месяц (из listReadings)
  * @param {Object} production - запись ProductionOutput за месяц (или null)

@@ -1,6 +1,12 @@
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import { METERS } from './meterConfig';
+import { calcVedomostTotal, getMeterConsumption } from './consumptionCalc';
+
+/** Счётчики, уже отражённые в именованных строках экспорта */
+const EXPORT_COVERED_METERS = new Set([
+  1, 4, 5, 6, 7, 8, 10, 15, 16, 17, 20, 21, 22,
+]);
 
 export const exportEnergyReportToExcel = async ({
   monthName,
@@ -260,11 +266,8 @@ export const exportEnergyReportToExcel = async ({
     currentRow++;
   };
 
-  // Other equipment
-  const getReading = (meterNum) => {
-    const r = readings.find(r => r.meter_number === meterNum);
-    return r ? r.consumption || 0 : 0;
-  };
+  const getReading = (meterNum) =>
+    getMeterConsumption(meterNum, readings, lineCalc);
 
   const getProd = (key) => {
     return production ? production[key] || 0 : 0;
@@ -321,26 +324,37 @@ export const exportEnergyReportToExcel = async ({
   const gran2NormGood = gran2Prod > 0 ? gran2Cons / gran2Prod : 0;
   addRow('Гранулятор-2', gran2Cons, gran2Prod || 0, '-', gran2Prod || 0, '-', gran2NormGood, true);
 
-  // Шрёдер (Сч.19)
-  const shrederCons = getReading(18);
+  // Шрёдер (Сч.23)
+  const shrederCons = getReading(22);
   addRow('Шрёдер', shrederCons, '-', '-', '-', '-', 0, true);
 
-  // Участок загрузки сырья (Сч.14)
-  const zagruzkaCons = getReading(13);
+  // Участок загрузки сырья (Сч.16)
+  const zagruzkaCons = getReading(15);
   addRow('Участок загрузки сырья', zagruzkaCons, '-', '-', '-', '-', '-', true);
 
   // «Интерполихим» (Сч.18)
   const interpolihimCons = getReading(17);
   addRow('«Интерполихим»', interpolihimCons, '-', '-', '-', '-', '-', true);
 
-  // Total Row
+  // Прочие счётчики из ведомости, не вошедшие в строки выше
+  for (const meter of METERS) {
+    if (EXPORT_COVERED_METERS.has(meter.number)) continue;
+    const cons = getReading(meter.number);
+    if (cons > 0) {
+      addRow(`${meter.name} (${meter.code})`, cons, '-', '-', '-', '-', '-', true);
+    }
+  }
+
+  const vedomostTotal = calcVedomostTotal(readings, lineCalc);
+
+  // Total Row — итог по той же формуле, что и в интерфейсе ведомости
   sheet.getRow(currentRow).height = 30;
   sheet.getCell(`A${currentRow}`).value = 'Всего потреблено на\nпроизводстве:';
   sheet.getCell(`A${currentRow}`).font = fontBold;
   sheet.getCell(`A${currentRow}`).alignment = alignCenter;
   sheet.getCell(`A${currentRow}`).border = borderMedium;
 
-  sheet.getCell(`B${currentRow}`).value = totalConsumption;
+  sheet.getCell(`B${currentRow}`).value = vedomostTotal;
   sheet.getCell(`B${currentRow}`).font = fontBold;
   sheet.getCell(`B${currentRow}`).alignment = alignCenter;
   sheet.getCell(`B${currentRow}`).border = borderMedium;
@@ -415,6 +429,35 @@ export const exportEnergyReportToExcel = async ({
   sheet.getCell(`B${currentRow}`).font = fontNormal;
   sheet.getCell(`B${currentRow}`).alignment = alignCenter;
   sheet.getCell(`B${currentRow}`).border = borderMedium;
+  currentRow++;
+
+  const snTotal =
+    (form.sn_zavod_kwh || 0) +
+    (form.sn_energocenter_kwh || 0) +
+    (form.losses_cable_kwh || 0) +
+    (form.losses_transformer_kwh || 0) +
+    (form.boiler_kwh || 0);
+
+  // --- Spacer ---
+  currentRow += 2;
+
+  // --- Сверка баланса (как в интерфейсе «Потребление ЭЭ») ---
+  sheet.getRow(currentRow).height = 25;
+  sheet.mergeCells(`A${currentRow}:D${currentRow}`);
+  sheet.getCell(`A${currentRow}`).value = 'Итого (ведомость + СН и потери) —';
+  sheet.getCell(`A${currentRow}`).font = fontBold;
+  sheet.getCell(`A${currentRow}`).alignment = { vertical: 'middle', horizontal: 'right' };
+
+  sheet.mergeCells(`E${currentRow}:F${currentRow}`);
+  sheet.getCell(`E${currentRow}`).value = vedomostTotal + snTotal;
+  sheet.getCell(`E${currentRow}`).font = fontBold;
+  sheet.getCell(`E${currentRow}`).alignment = alignCenter;
+  sheet.getCell(`E${currentRow}`).border = borderMedium;
+  sheet.getCell(`E${currentRow}`).fill = fillGreen;
+
+  sheet.getCell(`G${currentRow}`).value = 'кВт*ч';
+  sheet.getCell(`G${currentRow}`).font = fontBold;
+  sheet.getCell(`G${currentRow}`).alignment = { vertical: 'middle', horizontal: 'left' };
   currentRow++;
 
   // --- Spacer ---
