@@ -1,39 +1,17 @@
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
-import { getMeterConsumption } from './consumptionCalc';
+import { METERS } from './meterConfig';
+import { FRICOOLER_METER_NUMS, getMeterConsumption } from './consumptionCalc';
 
-/** Разницу баланса распределяем только в СН завода и энергоцентра (для Excel). */
-function calcAdjustedSnForExport(form, productionTotal, totalKwhVazmaEc) {
-  const snZavodForm = form.sn_zavod_kwh ?? 0;
-  const snEcForm = form.sn_energocenter_kwh ?? 0;
-  const lossesFixed =
-    (form.losses_cable_kwh ?? 0) +
-    (form.losses_transformer_kwh ?? 0) +
-    (form.boiler_kwh ?? 0);
+/** Счётчики уже отражённые именованными строками шаблона */
+const EXPORT_NAMED_METERS = new Set([
+  1, 4, 5, 6, 7, 8, 10, 15, 16, 17, 20, 21, 22,
+]);
 
-  // production + vazma + СН + потери = vazma + ec
-  const targetSnVariable =
-    totalKwhVazmaEc -
-    (form.vazma_active_kwh ?? 0) -
-    productionTotal -
-    lossesFixed;
-
-  const snVariableForm = snZavodForm + snEcForm;
-
-  if (snVariableForm <= 0) {
-    const half = targetSnVariable / 2;
-    return {
-      snZavod: Math.round(half * 10) / 10,
-      snEc: Math.round((targetSnVariable - half) * 10) / 10,
-    };
-  }
-
-  const snZavod = Math.round((snZavodForm / snVariableForm) * targetSnVariable * 10) / 10;
-  return {
-    snZavod,
-    snEc: Math.round((targetSnVariable - snZavod) * 10) / 10,
-  };
-}
+/** Выпуск для счётчиков вне FCL-шаблона */
+const EXTRA_PRODUCTION_KEYS = {
+  11: 'granulyaciya3',
+};
 
 export const exportEnergyReportToExcel = async ({
   monthName,
@@ -397,8 +375,26 @@ export const exportEnergyReportToExcel = async ({
   const interpolihimCons = getReading(17);
   addRow('«Интерполихим»', interpolihimCons, '-', '-', '-', '-', '-', true);
 
+  // Остальные счётчики ведомости — чтобы сумма кВт·ч совпала с UI
+  const leftoverMeters = METERS.filter(
+    (m) => !FRICOOLER_METER_NUMS.has(m.number) && !EXPORT_NAMED_METERS.has(m.number)
+  );
+  leftoverMeters.forEach((meter) => {
+    const cons = getReading(meter.number);
+    const prodKey = EXTRA_PRODUCTION_KEYS[meter.number];
+    const rowName = meter.name || meter.code;
+    if (prodKey) {
+      const prod = getProd(prodKey);
+      const norms = calcNorms(cons, prod, getProd(`${prodKey}_brak`));
+      addRow(rowName, cons, prod || 0, norms.defect, norms.good, norms.normTotal, norms.normGood, true);
+    } else {
+      addRow(rowName, cons, '-', '-', '-', '-', '-', true);
+    }
+  });
+
   const totalKwhVazmaEc = (form.vazma_active_kwh || 0) + (form.ec_produced_kwh || 0);
-  const { snZavod, snEc } = calcAdjustedSnForExport(form, totalConsumption, totalKwhVazmaEc);
+  const snZavod = form.sn_zavod_kwh ?? 0;
+  const snEc = form.sn_energocenter_kwh ?? 0;
 
   // Total Row — сумма строк оборудования выше
   sheet.getRow(currentRow).height = 30;
