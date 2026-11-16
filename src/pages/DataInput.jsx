@@ -1,7 +1,8 @@
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { METERS, MONTHS } from "@/lib/meterConfig";
 import { listReadings, upsertReadings, deleteReading } from "@/lib/supabaseApi";
+import { supabase } from "@/api/supabaseClient";
 import { useUnsavedGuard } from "@/lib/UnsavedChangesContext";
 import GlassCard from "../components/layout/GlassCard";
 import MonthSelector from "../components/table/MonthSelector";
@@ -9,10 +10,33 @@ import SaveReminderBanner from "../components/layout/SaveReminderBanner";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Save, Loader2, Check, Search, Trash2 } from "lucide-react";
+import { Save, Loader2, Check, Search, Trash2, ImagePlus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/AuthContext";
+
+function fileToJpegDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      const maxSide = 2000;
+      const scale = Math.min(1, maxSide / Math.max(image.width, image.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(image.width * scale);
+      canvas.height = Math.round(image.height * scale);
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(url);
+      resolve(canvas.toDataURL("image/jpeg", 0.85));
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Не удалось открыть фото"));
+    };
+    image.src = url;
+  });
+}
 
 export default function DataInput() {
   const { user } = useAuth();
@@ -27,6 +51,11 @@ export default function DataInput() {
   const [searchQuery, setSearchQuery] = useState("");
   const [savingMeter, setSavingMeter] = useState(null);
   const [savingAll, setSavingAll] = useState(false);
+  const [readingPhoto, setReadingPhoto] = useState(false);
+  const [savingIc, setSavingIc] = useState(false);
+  const [ocrReport, setOcrReport] = useState(null);
+  const [uncertainMeters, setUncertainMeters] = useState({});
+  const photoInputRef = useRef(null);
   const queryClient = useQueryClient();
 
   const { data: readings, isLoading } = useQuery({
@@ -155,8 +184,87 @@ export default function DataInput() {
   const changeMonth = (fn) => {
     requestLeave(() => {
       setInputValues({});
+      setOcrReport(null);
+      setUncertainMeters({});
       fn();
     });
+  };
+
+  const handlePhoto = async (file) => {
+    if (!file) return;
+    setReadingPhoto(true);
+    try {
+      const image = await fileToJpegDataUrl(file);
+      const response = await fetch("/api/read-meter-sheet", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "Не удалось прочитать бланк");
+
+      const nextValues = {};
+      const nextUncertain = {};
+      for (const row of payload.meters || []) {
+        nextValues[row.number] = String(row.reading);
+        if (row.uncertain || row.replaced_from != null) nextUncertain[row.number] = row;
+      }
+      setInputValues((prev) => ({ ...prev, ...nextValues }));
+      setUncertainMeters(nextUncertain);
+      setOcrReport(payload);
+      const icCount = ["water", "ee", "heating"].filter((key) => payload.ic?.[key] != null).length;
+      toast.success(
+        `Прочитано счётчиков: ${payload.meters?.length || 0}` +
+          (icCount ? `, строки ИЦ: ${icCount}` : "")
+      );
+    } catch (err) {
+      console.error("[DataInput] photo read error:", err);
+      toast.error(err.message || "Не удалось прочитать бланк");
+    } finally {
+      setReadingPhoto(false);
+    }
+  };
+
+  const saveIcFromReport = async () => {
+    const ic = ocrReport?.ic;
+    if (!ic) return;
+    const patch = {};
+    if (ic.ee != null) patch.ee_reading = ic.ee;
+    if (ic.water != null) {
+      patch.water_supply_reading = ic.water;
+      patch.water_drainage_reading = ic.water;
+    }
+    if (ic.heating != null) patch.heating_reading = ic.heating;
+    if (Object.keys(patch).length === 0) return;
+
+    setSavingIc(true);
+    try {
+      const { data: existing, error: readError } = await supabase
+        .from("ic_readings")
+        .select("id")
+        .eq("year", selectedYear)
+        .eq("month", selectedMonth)
+        .maybeSingle();
+      if (readError) throw readError;
+      if (existing?.id) {
+        const { error } = await supabase.from("ic_readings").update(patch).eq("id", existing.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from("ic_readings").insert({
+          year: selectedYear,
+          month: selectedMonth,
+          ...patch,
+        });
+        if (error) throw error;
+      }
+      queryClient.invalidateQueries({ queryKey: ["ic-readings"] });
+      toast.success(`Показания ИЦ за ${selectedMonth} записаны`);
+    } catch (err) {
+      console.error("[DataInput] ic save error:", err);
+      toast.error("Не удалось записать показания ИЦ");
+    } finally {
+      setSavingIc(false);
+    }
   };
 
   const filteredMeters = METERS.filter(
@@ -177,6 +285,35 @@ export default function DataInput() {
           <p className="text-sm text-muted-foreground mt-1">
             Данные сохраняются в Supabase
           </p>
+          {canEdit && (
+            <div className="mt-3">
+              <input
+                ref={photoInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  handlePhoto(file);
+                }}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                disabled={readingPhoto}
+                onClick={() => photoInputRef.current?.click()}
+                className="bg-white/5 border-white/10"
+              >
+                {readingPhoto ? (
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <ImagePlus className="w-4 h-4 mr-2" />
+                )}
+                {readingPhoto ? "Читаю бланк..." : "Загрузить фото бланка"}
+              </Button>
+            </div>
+          )}
         </div>
         <GlassCard className="p-4 min-w-[280px]">
           <MonthSelector
@@ -207,6 +344,58 @@ export default function DataInput() {
           className="pl-10 bg-white/5 border-white/10 backdrop-blur-xl"
         />
       </div>
+
+      {ocrReport && (
+        <GlassCard className="p-4 space-y-3">
+          <div>
+            <p className="text-sm font-semibold text-foreground">Бланк прочитан</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              Цифры разложены по строкам этого бланка, не по номеру карточки один в один.
+              Жёлтая рамка — цифра сомнительная или на бланке была исправлена. В базу ещё ничего не записано.
+            </p>
+          </div>
+          {ocrReport.ic && ["water", "ee", "heating"].some((key) => ocrReport.ic[key] != null) && (
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3 text-xs">
+              <p className="text-muted-foreground">
+                ИЦ: вода {ocrReport.ic.water ?? "—"}, свет {ocrReport.ic.ee ?? "—"}, тепло{" "}
+                {ocrReport.ic.heating ?? "—"} Гкал
+              </p>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={savingIc}
+                onClick={saveIcFromReport}
+                className="bg-white/5 border-white/10 shrink-0"
+              >
+                {savingIc ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : null}
+                Записать в расчёт ИЦ
+              </Button>
+            </div>
+          )}
+          {ocrReport.meters?.length > 0 && (
+            <p className="text-xs text-foreground leading-relaxed">
+              {ocrReport.meters
+                .map((row) => `${row.number} · ${row.name}: ${row.reading}`)
+                .join("  ·  ")}
+            </p>
+          )}
+          {ocrReport.extras?.length > 0 && (
+            <p className="text-xs text-muted-foreground">
+              На бланке есть, в этой вкладке поля нет:{" "}
+              {ocrReport.extras.map((row) => `${row.label} ${row.reading}`).join("; ")}
+            </p>
+          )}
+          {ocrReport.unmatched?.length > 0 && (
+            <p className="text-xs text-amber-200/90">
+              Не разложено, проверьте вручную:{" "}
+              {ocrReport.unmatched
+                .map((row) => `строка ${row.paper_row ?? "—"} «${row.note}» = ${row.reading}`)
+                .join("; ")}
+            </p>
+          )}
+        </GlassCard>
+      )}
 
       {isLoading ? (
         <div className="flex items-center justify-center py-20">
@@ -270,12 +459,19 @@ export default function DataInput() {
                     type="number"
                     placeholder={hasData ? existing.current_reading?.toString() : "Показание..."}
                     value={inputValues[meter.number] || ""}
-                    onChange={(e) =>
-                      setInputValues((prev) => ({ ...prev, [meter.number]: e.target.value }))
-                    }
+                    onChange={(e) => {
+                      setInputValues((prev) => ({ ...prev, [meter.number]: e.target.value }));
+                      setUncertainMeters((prev) => {
+                        if (!prev[meter.number]) return prev;
+                        const next = { ...prev };
+                        delete next[meter.number];
+                        return next;
+                      });
+                    }}
                     className={cn(
                       "bg-white/5 border-white/10 text-sm tabular-nums",
-                      hasDraft && "border-amber-500/40"
+                      hasDraft && "border-amber-500/40",
+                      uncertainMeters[meter.number] && "border-amber-400 ring-1 ring-amber-400/60"
                     )}
                     onKeyDown={(e) => e.key === "Enter" && handleSave(meter)}
                     disabled={!canEdit}

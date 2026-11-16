@@ -438,7 +438,7 @@ export default function IcCalculation() {
               </div>
               <div>
                 <p className="text-sm font-semibold text-foreground">Отопление</p>
-                <p className="text-[11px] text-muted-foreground">Показание счётчика, Гкал</p>
+                <p className="text-[11px] text-muted-foreground">Показание счётчика, Гкал · 0 = нет отопления</p>
               </div>
             </div>
 

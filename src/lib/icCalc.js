@@ -19,6 +19,13 @@ export function calcMonthDiff(current, previous) {
   return diff >= 0 ? diff : null;
 }
 
+/** Отопление: 0 в текущем месяце = нет расхода (лето), не ошибка показаний */
+function calcHeatingConsumption(current, previous) {
+  if (current == null || isNaN(Number(current))) return null;
+  if (Number(current) === 0) return 0;
+  return calcMonthDiff(current, previous);
+}
+
 function prevWaterReading(prevForm) {
   if (!prevForm) return null;
   return prevForm.water_reading ?? prevForm.water_supply_reading ?? prevForm.water_drainage_reading ?? null;
@@ -72,7 +79,10 @@ export function buildIcCalculation({ form, prevForm, energyReport }) {
   const waterSupplyConsumption = waterConsumption;
   const waterDrainageConsumption = waterConsumption;
 
-  const heatingConsumption = calcMonthDiff(form.heating_reading, prevForm?.heating_reading);
+  const heatingConsumption = calcHeatingConsumption(
+    form.heating_reading,
+    prevForm?.heating_reading
+  );
 
   const waterSupplyTariff = form.water_supply_tariff ?? IC_WATER_SUPPLY_TARIFF;
   const waterDrainageTariff = form.water_drainage_tariff ?? IC_WATER_DRAINAGE_TARIFF;
