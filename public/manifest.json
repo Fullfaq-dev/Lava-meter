@@ -1,0 +1,8 @@
+{
+  "name": "ЭнергоУчёт",
+  "short_name": "ЭнергоУчёт",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0b1020",
+  "theme_color": "#0b1020"
+}

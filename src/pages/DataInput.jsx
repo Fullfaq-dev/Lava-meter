@@ -15,9 +15,17 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/AuthContext";
 
-function fileToJpegDataUrl(file) {
+function readFileAsDataUrl(file) {
   return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file);
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error("Файл не прочитался с диска"));
+    reader.readAsDataURL(file);
+  });
+}
+
+function compressDataUrl(dataUrl) {
+  return new Promise((resolve, reject) => {
     const image = new Image();
     image.onload = () => {
       const maxSide = 2000;
@@ -26,16 +34,36 @@ function fileToJpegDataUrl(file) {
       canvas.width = Math.round(image.width * scale);
       canvas.height = Math.round(image.height * scale);
       const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        reject(new Error("Браузер не смог подготовить фото"));
+        return;
+      }
       ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
-      URL.revokeObjectURL(url);
       resolve(canvas.toDataURL("image/jpeg", 0.85));
     };
-    image.onerror = () => {
-      URL.revokeObjectURL(url);
-      reject(new Error("Не удалось открыть фото"));
-    };
-    image.src = url;
+    image.onerror = () => reject(new Error("compress"));
+    image.src = dataUrl;
   });
+}
+
+async function fileToJpegDataUrl(file) {
+  const name = file.name || "фото";
+  const type = (file.type || "").toLowerCase();
+  const heic = type.includes("heic") || type.includes("heif") || /\.hei[cf]$/i.test(name);
+  if (heic) {
+    throw new Error(`«${name}» — это HEIC с айфона. Сохраните снимок как JPEG и загрузите ещё раз.`);
+  }
+
+  const original = await readFileAsDataUrl(file);
+  if (typeof original !== "string" || !original.startsWith("data:image/")) {
+    throw new Error(`«${name}» не открывается как фото. Нужен файл JPEG или PNG.`);
+  }
+
+  try {
+    return await compressDataUrl(original);
+  } catch {
+    return original;
+  }
 }
 
 export default function DataInput() {
@@ -52,6 +80,7 @@ export default function DataInput() {
   const [savingMeter, setSavingMeter] = useState(null);
   const [savingAll, setSavingAll] = useState(false);
   const [readingPhoto, setReadingPhoto] = useState(false);
+  const [photoStatus, setPhotoStatus] = useState(null);
   const [savingIc, setSavingIc] = useState(false);
   const [ocrReport, setOcrReport] = useState(null);
   const [uncertainMeters, setUncertainMeters] = useState({});
@@ -192,16 +221,26 @@ export default function DataInput() {
 
   const handlePhoto = async (file) => {
     if (!file) return;
+    const fileName = file.name || "фото";
     setReadingPhoto(true);
+    setOcrReport(null);
+    setPhotoStatus({
+      kind: "reading",
+      text: `«${fileName}» принято. Читаю бланк, обычно это 10–20 секунд.`,
+    });
     try {
       const image = await fileToJpegDataUrl(file);
+      setPhotoStatus({
+        kind: "reading",
+        text: `«${fileName}» загружено. Жду ответ по строкам бланка.`,
+      });
       const response = await fetch("/api/read-meter-sheet", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ image }),
       });
       const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.error || "Не удалось прочитать бланк");
+      if (!response.ok) throw new Error(payload.error || "Сервер не прочитал бланк");
 
       const nextValues = {};
       const nextUncertain = {};
@@ -212,14 +251,17 @@ export default function DataInput() {
       setInputValues((prev) => ({ ...prev, ...nextValues }));
       setUncertainMeters(nextUncertain);
       setOcrReport(payload);
+      setPhotoStatus(null);
       const icCount = ["water", "ee", "heating"].filter((key) => payload.ic?.[key] != null).length;
       toast.success(
         `Прочитано счётчиков: ${payload.meters?.length || 0}` +
           (icCount ? `, строки ИЦ: ${icCount}` : "")
       );
     } catch (err) {
+      const message = err?.message || "Не удалось прочитать бланк";
       console.error("[DataInput] photo read error:", err);
-      toast.error(err.message || "Не удалось прочитать бланк");
+      setPhotoStatus({ kind: "error", text: message });
+      toast.error(message);
     } finally {
       setReadingPhoto(false);
     }
@@ -325,6 +367,25 @@ export default function DataInput() {
           />
         </GlassCard>
       </div>
+
+      {photoStatus?.kind === "reading" && (
+        <GlassCard className="p-4 border border-primary/40 bg-primary/10">
+          <div className="flex items-center gap-3">
+            <Loader2 className="w-5 h-5 animate-spin text-primary shrink-0" />
+            <div>
+              <p className="text-sm font-semibold text-foreground">Фото загружается</p>
+              <p className="text-xs text-muted-foreground mt-1">{photoStatus.text}</p>
+            </div>
+          </div>
+        </GlassCard>
+      )}
+
+      {photoStatus?.kind === "error" && (
+        <GlassCard className="p-4 border border-red-500/40 bg-red-500/10">
+          <p className="text-sm font-semibold text-red-300">Фото не прочитано</p>
+          <p className="text-sm text-red-100 mt-1">{photoStatus.text}</p>
+        </GlassCard>
+      )}
 
       {canEdit && (
         <SaveReminderBanner
