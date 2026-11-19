@@ -2,10 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { MONTHS } from "@/lib/meterConfig";
 import { supabase } from "@/api/supabaseClient";
 import { buildIcCalculation, getPrevMonth, getIcMissingFields, buildIcFormFromDb } from "@/lib/icCalc";
-import {
-  IC_EE_TRANSFORM_COEF,
-  IC_HEATING_TARIFF_PER_GCAL,
-} from "@/lib/icConfig";
+import { IC_EE_TRANSFORM_COEF } from "@/lib/icConfig";
 import { exportIcReportWord } from "@/lib/exportWordIc";
 import { isFormDirty, snapshotForm } from "@/lib/formDirty";
 import { useUnsavedGuard } from "@/lib/UnsavedChangesContext";
@@ -447,7 +444,11 @@ export default function IcCalculation() {
 
             <div className="mt-3 rounded-lg bg-chart-4/5 border border-chart-4/20 px-3 py-2 space-y-0.5">
               <CalcRow label="Потребление за месяц" value={fmt(calc.heatingConsumption, 4)} unit="Гкал" />
-              <CalcRow label="Тариф" value={fmt(IC_HEATING_TARIFF_PER_GCAL, 2)} unit="₽/Гкал" />
+              <CalcRow label="Цена газа" value={calc.heating ? fmt(calc.heating.gasPrice, 2) : "—"} unit="₽/м³" />
+              <CalcRow label="Теплотворность" value={calc.heating ? fmt(calc.heating.calorificKwhPerM3, 2) : "—"} unit="кВт·ч/м³" />
+              <CalcRow label="КПД ГПУ" value={calc.heating ? fmt(calc.heating.efficiency * 100, 0) : "—"} unit="%" />
+              <CalcRow label="Газ на 1 Гкал" value={calc.heating ? fmt(calc.heating.m3PerGcal, 2) : "—"} unit="м³" />
+              <CalcRow label="Цена 1 Гкал" value={calc.heatingTariff != null ? fmt(calc.heatingTariff, 2) : "—"} unit="₽" />
               <CalcRow label="Сумма ИЦ" value={fmtRub(calc.heatingAmount)} unit="" highlight />
             </div>
           </GlassCard>

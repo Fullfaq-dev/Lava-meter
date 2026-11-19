@@ -3,8 +3,38 @@ import {
   IC_EE_TRANSFORM_COEF,
   IC_WATER_SUPPLY_TARIFF,
   IC_WATER_DRAINAGE_TARIFF,
-  IC_HEATING_TARIFF_PER_GCAL,
+  IC_KWH_PER_GCAL,
+  IC_GAS_CALORIFIC_KWH_PER_M3,
+  IC_GPU_TOTAL_EFFICIENCY,
+  IC_HEAT_OPEX_SHARE,
 } from "./icConfig";
+
+function roundMoney(value) {
+  return Math.round(value * 100) / 100;
+}
+
+/** Себестоимость 1 Гкал: 1163 / (теплотворность × КПД) × цена газа. */
+export function calcHeatingTariff(energyReport) {
+  const volume = energyReport?.ec_gas_volume_m3;
+  const payment = energyReport?.ec_gas_payment_rub;
+  if (volume == null || volume <= 0 || payment == null) return null;
+
+  const gasPrice = roundMoney(payment / volume);
+  const m3PerGcal = IC_KWH_PER_GCAL / (IC_GAS_CALORIFIC_KWH_PER_M3 * IC_GPU_TOTAL_EFFICIENCY);
+  const fuelComponent = roundMoney(m3PerGcal * gasPrice);
+  const opex = roundMoney(fuelComponent * IC_HEAT_OPEX_SHARE);
+
+  return {
+    gasPrice,
+    calorificKwhPerM3: IC_GAS_CALORIFIC_KWH_PER_M3,
+    efficiency: IC_GPU_TOTAL_EFFICIENCY,
+    kwhPerGcal: IC_KWH_PER_GCAL,
+    m3PerGcal,
+    fuelComponent,
+    opex,
+    tariff: roundMoney(fuelComponent + opex),
+  };
+}
 
 export function getPrevMonth(year, monthName) {
   const idx = MONTHS.indexOf(monthName);
@@ -102,10 +132,16 @@ export function buildIcCalculation({ form, prevForm, energyReport }) {
       ? waterSupplyAmount + waterDrainageAmount
       : null;
 
+  const heating = calcHeatingTariff(energyReport);
+  const heatingTariff = heating?.tariff ?? null;
   const heatingAmount =
-    heatingConsumption != null
-      ? heatingConsumption * IC_HEATING_TARIFF_PER_GCAL
-      : null;
+    heatingConsumption == null
+      ? null
+      : heatingConsumption === 0
+        ? 0
+        : heatingTariff == null
+          ? null
+          : heatingConsumption * heatingTariff;
 
   const totalAmount =
     [eeAmount, waterTotalAmount, heatingAmount].every((v) => v != null)
@@ -122,6 +158,8 @@ export function buildIcCalculation({ form, prevForm, energyReport }) {
     waterSupplyConsumption,
     waterDrainageConsumption,
     heatingConsumption,
+    heating,
+    heatingTariff,
     eeTariff,
     eeTransformCoef: IC_EE_TRANSFORM_COEF,
     waterSupplyTariff,
@@ -145,5 +183,8 @@ export function getIcMissingFields({ form, prevForm, energyReport }) {
   if (form.heating_reading == null) missing.push("показание отопления");
   if (form.residents_count == null) missing.push("число проживающих");
   if (!energyReport) missing.push("вкладка «Потребление ЭЭ»");
+  else if (form.heating_reading != null && Number(form.heating_reading) !== 0 && !calcHeatingTariff(energyReport)) {
+    missing.push("оплата и объём газа энергоцентра");
+  }
   return missing;
 }

@@ -14,10 +14,7 @@ import {
 import { saveAs } from "file-saver";
 import { MONTHS, MONTHS_GENITIVE } from "./meterConfig";
 import { getPrevMonth } from "./icCalc";
-import {
-  IC_EE_TRANSFORM_COEF,
-  IC_HEATING_TARIFF_PER_GCAL,
-} from "./icConfig";
+import { IC_EE_TRANSFORM_COEF } from "./icConfig";
 
 const BLUE = "2E75B6";
 const FONT = "Times New Roman";
@@ -253,7 +250,7 @@ export async function exportIcReportWord({
         fmtInt(prevForm?.heating_reading),
         fmtInt(form.heating_reading),
         fmtInt(calc.heatingConsumption),
-        `${IC_HEATING_TARIFF_PER_GCAL} (стоимость 1 Гк)`,
+        calc.heatingTariff != null ? `${fmtNum(calc.heatingTariff, 2)} (стоимость 1 Гк)` : "—",
         fmtMoney(calc.heatingAmount),
       ]
     ),
@@ -262,7 +259,13 @@ export async function exportIcReportWord({
       { size: 20, before: 80 }
     ),
     p(
-      `${fmtInt(calc.heatingConsumption)}×${IC_HEATING_TARIFF_PER_GCAL}(стоимость 1 Гк) = ${fmtMoney(calc.heatingAmount)} руб,`,
+      calc.heating
+        ? `1163 / (${fmtNum(calc.heating.calorificKwhPerM3, 2)} × ${fmtNum(calc.heating.efficiency, 2)}) = ${fmtNum(calc.heating.m3PerGcal, 2)} м³ газа на 1 Гкал; ${fmtNum(calc.heating.m3PerGcal, 2)} × ${fmtNum(calc.heating.gasPrice, 2)} = ${fmtNum(calc.heatingTariff, 2)} руб/Гкал.`
+        : "Нет цены газа энергоцентра за этот месяц.",
+      { size: 20 }
+    ),
+    p(
+      `${fmtInt(calc.heatingConsumption)}×${calc.heatingTariff != null ? fmtNum(calc.heatingTariff, 2) : "—"}(стоимость 1 Гк) = ${fmtMoney(calc.heatingAmount)} руб,`,
       { size: 20, after: 200 }
     ),
 
