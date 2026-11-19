@@ -255,19 +255,30 @@ export async function exportIcReportWord({
       ]
     ),
     p(
-      `Расчет: (${fmtInt(form.heating_reading)}-${fmtInt(prevForm?.heating_reading)})=${fmtInt(calc.heatingConsumption)};`,
+      `Расход тепла: (${fmtInt(form.heating_reading)} показание на конец ${currGen} − ${fmtInt(prevForm?.heating_reading)} показание на конец ${prevGen}) = ${fmtInt(calc.heatingConsumption)} Гкал.`,
       { size: 20, before: 80 }
     ),
-    p(
-      calc.heating
-        ? `1163 / (${fmtNum(calc.heating.calorificKwhPerM3, 2)} × ${fmtNum(calc.heating.efficiency, 2)}) = ${fmtNum(calc.heating.m3PerGcal, 2)} м³ газа на 1 Гкал; ${fmtNum(calc.heating.m3PerGcal, 2)} × ${fmtNum(calc.heating.gasPrice, 2)} = ${fmtNum(calc.heatingTariff, 2)} руб/Гкал.`
-        : "Нет цены газа энергоцентра за этот месяц.",
-      { size: 20 }
-    ),
-    p(
-      `${fmtInt(calc.heatingConsumption)}×${calc.heatingTariff != null ? fmtNum(calc.heatingTariff, 2) : "—"}(стоимость 1 Гк) = ${fmtMoney(calc.heatingAmount)} руб,`,
-      { size: 20, after: 200 }
-    ),
+    ...(calc.heating
+      ? [
+          p(
+            `${fmtNum(calc.heating.kwhPerGcal, 0)} (кВт·ч в 1 Гкал) / (${fmtNum(calc.heating.calorificKwhPerM3, 2)} (теплотворность газа, кВт·ч/м³) × ${fmtNum(calc.heating.efficiency, 2)} (общий КПД ГПУ)) = ${fmtNum(calc.heating.m3PerGcal, 2)} м³ газа на 1 Гкал.`,
+            { size: 20 }
+          ),
+          p(
+            `${fmtNum(calc.heating.m3PerGcal, 2)} (расход газа на 1 Гкал, м³) × ${fmtNum(calc.heating.gasPrice, 2)} (цена газа энергоцентра за ${monthTariff}, руб/м³) = ${fmtNum(calc.heatingTariff, 2)} руб за 1 Гкал.`,
+            { size: 20 }
+          ),
+          p(
+            `${fmtInt(calc.heatingConsumption)} (потребление, Гкал) × ${fmtNum(calc.heatingTariff, 2)} (стоимость 1 Гкал) = ${fmtMoney(calc.heatingAmount)} руб.`,
+            { bold: true, size: 20, after: 200 }
+          ),
+        ]
+      : [
+          p("Нет цены газа энергоцентра за этот месяц: не из чего посчитать стоимость 1 Гкал.", {
+            size: 20,
+            after: 200,
+          }),
+        ]),
 
     // ——— ИТОГО ———
     p("ИТОГО", { bold: true, blue: true, size: 28, before: 200, after: 60 }),
