@@ -107,9 +107,11 @@ export default function EnergyReportInput() {
       return sum + (fclRow ? fclRow.total_consumption : (r.consumption || 0));
     }, 0);
 
+    // Та же формула, что в Excel: Россети + Атом + реактив + газ / (Вязьма-2 + энергоцентр)
     const localTotalCost =
       (f.vazma_active_rosseti_rub ?? 0) +
       (f.vazma_active_atom_rub    ?? 0) +
+      (f.vazma_reactive_rosseti_rub ?? 0) +
       (f.ec_gas_payment_rub       ?? 0);
     const localTotalCostPerKwh = totalKwhVazmaEc > 0 ? localTotalCost / totalKwhVazmaEc : null;
     const localVazmaCostPerKwh =
@@ -282,11 +284,13 @@ export default function EnergyReportInput() {
 
   const total_kwh = vedomostTotal + sn_total;
   const total_kwh_vazma_ec = (f.vazma_active_kwh ?? 0) + (f.ec_produced_kwh ?? 0);
+  // Как в выгрузке Excel: деньги делятся на входящую энергию, а не на сумму цеховых счётчиков
   const total_cost =
     (f.vazma_active_rosseti_rub ?? 0) +
     (f.vazma_active_atom_rub ?? 0) +
+    (f.vazma_reactive_rosseti_rub ?? 0) +
     (f.ec_gas_payment_rub ?? 0);
-  const total_cost_per_kwh = total_kwh > 0 ? total_cost / total_kwh : null;
+  const total_cost_per_kwh = total_kwh_vazma_ec > 0 ? total_cost / total_kwh_vazma_ec : null;
 
   const handleExport = async () => {
     try {

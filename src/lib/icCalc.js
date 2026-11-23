@@ -97,6 +97,7 @@ export function calcEeTariffPerKwh(energyReport) {
   const totalCost =
     (energyReport.vazma_active_rosseti_rub ?? 0) +
     (energyReport.vazma_active_atom_rub ?? 0) +
+    (energyReport.vazma_reactive_rosseti_rub ?? 0) +
     (energyReport.ec_gas_payment_rub ?? 0);
   return totalCost / totalKwh;
 }

@@ -189,6 +189,7 @@ export async function syncAllMonthsToLineSummary() {
       const total_cost =
         (energyReport.vazma_active_rosseti_rub ?? 0) +
         (energyReport.vazma_active_atom_rub    ?? 0) +
+        (energyReport.vazma_reactive_rosseti_rub ?? 0) +
         (energyReport.ec_gas_payment_rub       ?? 0);
       const total_cost_per_kwh = total_kwh_vazma_ec > 0 ? total_cost / total_kwh_vazma_ec : null;
 
